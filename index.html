@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>中醫穴位錄音系統</title>
+<meta name="description" content="record the name of acupuncture for various of vocal characters" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="icon" href="./icons/icon-192.png" />
+<link rel="apple-touch-icon" href="./icons/icon-192.png" />
+<meta name="theme-color" content="#1a7a6f" />
+<link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header__title">
+    <span class="app-header__logo" aria-hidden="true">&#127807;</span>
+    <span>中醫穴位錄音系統</span>
+  </div>
+  <button id="settingsBtn" class="icon-btn" title="資料夾設定" aria-label="資料夾設定">&#9881;</button>
+</header>
+
+<div id="errorBanner" class="banner banner--error" hidden>
+  <span id="errorBannerText"></span>
+  <button id="errorBannerClose" class="banner__close" aria-label="關閉">&times;</button>
+</div>
+
+<main id="app">
+
+  <!-- ========== 首頁：選擇錄音模式 ========== -->
+  <section id="screen-home" class="screen">
+    <h1 class="screen-title">錄音模式</h1>
+
+    <div class="mode-cards">
+      <button class="mode-card" id="modeCardSequential" data-mode="sequential">
+        <span class="mode-card__icon">&#9776;</span>
+        <span class="mode-card__label">逐穴錄音</span>
+        <span class="mode-card__hint">依經脈順序，逐穴錄製</span>
+      </button>
+      <button class="mode-card" id="modeCardSingle" data-mode="single">
+        <span class="mode-card__icon">&#9679;</span>
+        <span class="mode-card__label">單穴錄音</span>
+        <span class="mode-card__hint">選擇經脈與穴位，單獨錄製</span>
+      </button>
+    </div>
+
+    <div id="sequentialPicker" class="field-group">
+      <label for="meridianSelect">經脈</label>
+      <select id="meridianSelect"></select>
+
+      <div class="progress-hint" id="sequentialProgressHint" hidden></div>
+
+      <button id="startSequentialBtn" class="btn btn--primary btn--block">開始錄音</button>
+      <button id="reRecordMeridianBtn" class="btn btn--ghost btn--block" hidden>重錄整條經脈</button>
+    </div>
+
+    <div id="singlePicker" class="field-group" hidden>
+      <label for="meridianSelectSingle">經脈</label>
+      <select id="meridianSelectSingle"></select>
+
+      <label for="pointSelectSingle">穴位</label>
+      <select id="pointSelectSingle"></select>
+
+      <button id="startSingleBtn" class="btn btn--primary btn--block">開始錄音</button>
+    </div>
+  </section>
+
+  <!-- ========== 逐穴 / 單穴 錄音畫面（共用結構） ========== -->
+  <section id="screen-recording" class="screen" hidden>
+    <div class="badges">
+      <span class="badge badge--mode" id="recModeBadge">逐穴錄音</span>
+      <span class="badge-label">經脈</span>
+      <span class="badge badge--meridian" id="recMeridianBadge">手太陰肺經</span>
+    </div>
+
+    <div class="point-display">
+      <div class="point-name" id="recPointName">中府</div>
+      <div class="point-progress" id="recPointProgress">1 / 11</div>
+    </div>
+
+    <div class="status-light" id="statusLight" data-state="ready">
+      <span class="status-dot"></span>
+      <span class="status-text" id="statusText">READY</span>
+    </div>
+    <div class="status-hint" id="statusHint">請開始錄音，說出穴位名稱</div>
+
+    <button id="saveNextBtn" class="btn btn--primary btn--block btn--large">
+      <span class="btn__key">Enter</span>
+      <span id="saveNextLabel">儲存並下一穴</span>
+    </button>
+
+    <button id="cancelRecordingBtn" class="btn btn--ghost btn--block">返回</button>
+  </section>
+
+  <!-- ========== 逐穴錄音：完成畫面 ========== -->
+  <section id="screen-complete" class="screen" hidden>
+    <div class="complete-check">&#10003;</div>
+    <div class="complete-meridian" id="completeMeridianName">手太陰肺經</div>
+    <div class="complete-title">錄音全部完成！</div>
+    <div class="complete-progress" id="completeProgress">11 / 11</div>
+    <div class="complete-banner">&#10003; 已完成該條經脈的所有穴位錄音</div>
+    <button id="nextMeridianBtn" class="btn btn--primary btn--block">選擇下一條經脈</button>
+  </section>
+
+</main>
+
+<!-- 資料夾尚未授權時的提示卡 -->
+<div id="folderPrompt" class="modal" hidden>
+  <div class="modal__card">
+    <h2>需要選擇儲存資料夾</h2>
+    <p id="folderPromptText">請選擇一個資料夾，錄好的 MP3 檔案會直接存進去。</p>
+    <button id="folderPromptBtn" class="btn btn--primary btn--block">選擇資料夾</button>
+  </div>
+</div>
+
+<div class="attribution">檔名規範：[國際代碼]-[經脈名稱]-[穴位名稱].mp3　例：LU1-手太陰肺經-中府.mp3</div>
+
+<script src="./vendor/lame.min.js"></script>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
