@@ -141,7 +141,9 @@ function concatFrom(chunks, startSample, endSample) {
 
 // 首尾靜音裁切：找出振幅第一次/最後一次超過閾值的位置，前後各保留一小段緩衝(padding)，
 // 避免把講話開頭的氣音或尾音切掉。
-const SILENCE_THRESHOLD = 0.02; // 0~1 之間，PCM 振幅閾值，可視情況調整
+const SILENCE_THRESHOLD = 0.01; // 0~1 之間，PCM 振幅閾值。存檔前會做音量正規化把偏小聲的錄音
+// 放大到接近滿格，所以這裡只需要抓「真的完全沒講話／純背景雜訊」的情況即可，不需要設太高，
+// 設太高反而會把「錄得小聲但放大後其實正常」的內容誤判成沒偵測到聲音。
 const PADDING_SECONDS = 0.15;
 
 export function trimSilence(left, right, sampleRate = SAMPLE_RATE) {
