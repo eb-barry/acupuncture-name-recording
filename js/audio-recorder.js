@@ -170,6 +170,29 @@ export function trimSilence(left, right, sampleRate = SAMPLE_RATE) {
   return { left: left.subarray(start, end), right: right.subarray(start, end) };
 }
 
+// 頭尾淡入淡出（fade in / fade out）：錄音是在按 Enter 的瞬間被硬切開的，切點的振幅通常不是剛好
+// 等於 0，聲音撥放時會從無到有（或從有到無）瞬間跳一個電壓差，聽起來就像「喀」一聲的爆裂音。
+// 在頭尾各加一小段（預設 8 毫秒）平滑的淡入淡出，就能消除這個聲音。8 毫秒遠短於任何一個字的發音
+// 時間，加上 trimSilence 本來就在頭尾各保留了 150 毫秒的緩衝，所以不會裁到真正的語音內容。
+const FADE_SECONDS = 0.008;
+
+export function applyFadeInOut(left, right, sampleRate = SAMPLE_RATE, fadeSeconds = FADE_SECONDS) {
+  const fadeSamples = Math.min(Math.floor(sampleRate * fadeSeconds), Math.floor(left.length / 2));
+  if (fadeSamples <= 0) return { left, right };
+
+  const outLeft = Float32Array.from(left);
+  const outRight = Float32Array.from(right);
+  for (let i = 0; i < fadeSamples; i++) {
+    const gain = i / fadeSamples;
+    outLeft[i] *= gain;
+    outRight[i] *= gain;
+    const j = outLeft.length - 1 - i;
+    outLeft[j] *= gain;
+    outRight[j] *= gain;
+  }
+  return { left: outLeft, right: outRight };
+}
+
 function floatTo16BitPCM(float32) {
   const out = new Int16Array(float32.length);
   for (let i = 0; i < float32.length; i++) {
