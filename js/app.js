@@ -260,6 +260,11 @@ async function beginRecordingSession(mode) {
     return;
   }
 
+  // 防呆重設：正常情況下上一個 session 結束時應該已經把這兩個狀態重設過，
+  // 這裡再保險重設一次，避免任何遺漏的路徑讓下一個 session 一開始就卡住。
+  state.saving = false;
+  el.saveNextBtn.disabled = false;
+
   recorder.onLevel = (level) => {
     if (state.saving) return;
     setStatus(level > 0.02 ? 'recording' : 'ready');
@@ -363,6 +368,8 @@ async function saveCurrentPointAndAdvance(mode) {
 async function endSequentialSession() {
   window.removeEventListener('beforeunload', beforeUnloadHandler);
   await recorder.reset();
+  state.saving = false;
+  el.saveNextBtn.disabled = false;
   el.completeMeridianName.textContent = state.meridianName;
   el.completeProgress.textContent = `${state.points.length} / ${state.points.length}`;
   showScreen('complete');
