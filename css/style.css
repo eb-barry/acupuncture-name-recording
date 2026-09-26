@@ -19,6 +19,11 @@
 
 * { box-sizing: border-box; }
 
+/* 保險起見：任何元素只要有 hidden 屬性就一定要隱藏，不管其他規則有沒有另外設定 display。
+   .modal / .banner 都會設定自己的 display: flex，若沒有這一條，會蓋掉瀏覽器對 [hidden] 的預設隱藏行為，
+   導致該元素在還沒被 JS 顯示之前就一直顯示在畫面上。 */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   background: var(--bg);
