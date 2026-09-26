@@ -3,7 +3,7 @@ import {
   saveDirectoryHandle, loadDirectoryHandle, verifyPermission,
   getMeridianProgress, markPointDone, resetMeridianProgress, isPointDone,
 } from './storage.js';
-import { ContinuousRecorder, trimSilence, normalizeVolume, encodeMp3, hasSpeech } from './audio-recorder.js';
+import { ContinuousRecorder, trimSilence, normalizeVolume, applyFadeInOut, encodeMp3, hasSpeech } from './audio-recorder.js';
 
 // ---------- DOM refs ----------
 const $ = (id) => document.getElementById(id);
@@ -314,7 +314,8 @@ async function saveCurrentPointAndAdvance(mode) {
     }
     const trimmed = trimSilence(left, right);
     const normalized = normalizeVolume(trimmed.left, trimmed.right);
-    const blob = encodeMp3(normalized.left, normalized.right);
+    const faded = applyFadeInOut(normalized.left, normalized.right);
+    const blob = encodeMp3(faded.left, faded.right);
 
     const point = state.points[state.index];
     const fileName = buildFileName(state.meridianName, point);
