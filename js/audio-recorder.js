@@ -36,7 +36,7 @@ export class ContinuousRecorder {
         sampleRate: SAMPLE_RATE,
         echoCancellation: false,
         noiseSuppression: false,
-        autoGainControl: false,
+        autoGainControl: true,
       },
     });
 
@@ -177,6 +177,31 @@ function floatTo16BitPCM(float32) {
     out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
   return out;
+}
+
+// 音量標準化（peak normalization）：把這一段錄音的音量放大到接近最大，但不失真（不 clipping）。
+// 作法：找出這一段裡振幅最大的樣本，算出要放大幾倍才會讓它剛好到 targetPeak（預設 0.97，留一點點餘裕
+// 避免正好卡在 0dBFS 邊緣），然後把所有樣本乘上這個倍數。如果原本已經很大聲（比 targetPeak 還大），
+// 就不做任何處理，避免反而縮小音量。
+const TARGET_PEAK = 0.97;
+
+export function normalizeVolume(left, right, targetPeak = TARGET_PEAK) {
+  let peak = 0;
+  for (let i = 0; i < left.length; i++) {
+    const v = Math.max(Math.abs(left[i]), Math.abs(right[i]));
+    if (v > peak) peak = v;
+  }
+  if (peak === 0 || peak >= targetPeak) {
+    return { left, right };
+  }
+  const gain = targetPeak / peak;
+  const outLeft = new Float32Array(left.length);
+  const outRight = new Float32Array(right.length);
+  for (let i = 0; i < left.length; i++) {
+    outLeft[i] = left[i] * gain;
+    outRight[i] = right[i] * gain;
+  }
+  return { left: outLeft, right: outRight };
 }
 
 // 用 lamejs（已在頁面上以 <script> 載入為全域變數 lamejs）把立體聲 Float32 PCM 編碼成 MP3
