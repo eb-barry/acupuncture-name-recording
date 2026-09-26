@@ -203,10 +203,10 @@ function floatTo16BitPCM(float32) {
 }
 
 // 音量標準化（peak normalization）：把這一段錄音的音量放大到接近最大，但不失真（不 clipping）。
-// 作法：找出這一段裡振幅最大的樣本，算出要放大幾倍才會讓它剛好到 targetPeak（預設 0.97，留一點點餘裕
-// 避免正好卡在 0dBFS 邊緣），然後把所有樣本乘上這個倍數。如果原本已經很大聲（比 targetPeak 還大），
-// 就不做任何處理，避免反而縮小音量。
-const TARGET_PEAK = 0.97;
+// 作法：找出這一段裡振幅最大的樣本，算出要放大幾倍才會讓它剛好到 targetPeak（預設 0.9，保留約
+// 10% 的餘裕，避免聽起來太滿、或偶爾出現的短暫尖峰導致整段被放大不足），然後把所有樣本乘上這個
+// 倍數。如果原本已經很大聲（比 targetPeak 還大），就不做任何處理，避免反而縮小音量。
+const TARGET_PEAK = 0.9;
 
 export function normalizeVolume(left, right, targetPeak = TARGET_PEAK) {
   let peak = 0;
