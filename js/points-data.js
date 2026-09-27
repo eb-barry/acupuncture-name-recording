@@ -82,7 +82,7 @@ export function buildFileName(meridianName, point) {
   return `${point.code}-${meridianName}-${point.name}.mp3`;
 }
 
-// 每條經脈在正式逐穴錄音前，會先錄一段「經脈總穴數」的口播（例如「手太陰肺經共11穴」）。
+// 每條經脈在正式逐經脈錄音前，會先錄一段「經脈總穴數」的口播（例如「手太陰肺經共11穴」）。
 // 這個口播用 localStorage 進度追蹤時，用這個內部代碼當成一個特殊「穴位」來標記完成與否，
 // 不會跟真正的穴位代碼衝突（真正的穴位代碼不會有底線）。
 export const INTRO_CODE = '__INTRO__';
