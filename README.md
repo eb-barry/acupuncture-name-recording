@@ -7,8 +7,8 @@ record the name of acupuncture for various of vocal characters — the audio fil
 ## 使用方式（目前僅支援桌面版 Chrome / Edge）
 
 1. 用 Chrome 或 Edge 開啟 <https://eb-barry.github.io/acupuncture-name-recording/>
-2. 選擇「逐穴錄音」或「單穴錄音」模式
-   - **逐穴錄音**：選一條經脈，依國際標準碼順序（如 LU1 → LU11）逐穴錄製
+2. 選擇「逐經脈錄音」或「單穴錄音」模式
+   - **逐經脈錄音**：選一條經脈，先錄一段「經脈名稱共 N 穴」的口播，再依國際標準碼順序（如 LU1 → LU11）逐穴錄製
    - **單穴錄音**：選定經脈與單一穴位，單獨錄製 / 重錄
 3. 第一次按「開始錄音」時，瀏覽器會請你：
    - 授權麥克風

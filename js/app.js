@@ -292,7 +292,7 @@ async function beginRecordingSession(mode) {
     setStatus(level > 0.02 ? 'recording' : 'ready');
   };
 
-  el.recModeBadge.textContent = mode === 'sequential' ? '逐穴錄音' : '單穴錄音';
+  el.recModeBadge.textContent = mode === 'sequential' ? '逐經脈錄音' : '單穴錄音';
   el.saveNextLabel.textContent = mode === 'sequential' && state.stage === 'points' ? '儲存並下一穴' : '儲存錄音';
 
   showScreen('recording');
@@ -309,8 +309,8 @@ function renderIntro() {
   el.recMeridianBadge.textContent = state.meridianName;
   el.recPointName.textContent = buildIntroText(state.meridianName, points);
   el.recPointName.classList.add('point-name--intro');
-  el.recPointProgress.textContent = '經脈總穴數口播（逐穴錄音前，先錄這一句）';
-  el.saveNextLabel.textContent = '儲存並開始逐穴錄音';
+  el.recPointProgress.textContent = '經脈總穴數口播（逐經脈錄音前，先錄這一句）';
+  el.saveNextLabel.textContent = '儲存並開始逐經脈錄音';
   setStatus('ready');
 }
 
