@@ -1,4 +1,4 @@
-import { getMeridianNames, getPointsForMeridian, buildFileName } from './points-data.js';
+import { getMeridianNames, getPointsForMeridian, buildFileName, buildIntroFileName, buildIntroText, INTRO_CODE } from './points-data.js';
 import {
   saveDirectoryHandle, loadDirectoryHandle, verifyPermission,
   getMeridianProgress, markPointDone, resetMeridianProgress, isPointDone,
@@ -55,6 +55,7 @@ const el = {
 // ---------- App state ----------
 const state = {
   mode: 'sequential', // 'sequential' | 'single'
+  stage: 'points', // 'intro' | 'points'（單穴模式一律是 'points'）
   meridianName: null,
   points: [],
   index: 0,
@@ -132,16 +133,30 @@ el.settingsBtn.addEventListener('click', async () => {
 });
 
 // ---------- Populate dropdowns ----------
+async function isMeridianFullyDone(meridianName) {
+  const points = await getPointsForMeridian(meridianName);
+  if (points.length === 0) return false;
+  const progress = getMeridianProgress(meridianName);
+  const introDone = progress.done.includes(INTRO_CODE);
+  const allPointsDone = points.every((p) => progress.done.includes(p.code));
+  return introDone && allPointsDone;
+}
+
 async function populateMeridianSelects() {
   const names = await getMeridianNames();
   for (const select of [el.meridianSelect, el.meridianSelectSingle]) {
+    const previousValue = select.value;
     select.innerHTML = '';
     for (const name of names) {
       const opt = document.createElement('option');
       opt.value = name;
-      opt.textContent = name;
+      // 原生 <select> 的 <option> 在 Chrome 裡幾乎不吃自訂顏色（下拉選單清單是瀏覽器用系統原生元件畫的），
+      // 沒辦法把勾勾局部染成紅色；改用「✅」這個內建就有顏色的 emoji 字元當作完成標記，任何瀏覽器都能正確顯示。
+      const done = await isMeridianFullyDone(name);
+      opt.textContent = done ? `✅ ${name}` : name;
       select.appendChild(opt);
     }
+    if (previousValue && names.includes(previousValue)) select.value = previousValue;
   }
   await refreshSequentialHint();
   await populateSinglePointSelect();
@@ -152,17 +167,21 @@ async function refreshSequentialHint() {
   if (!meridianName) return;
   const points = await getPointsForMeridian(meridianName);
   const progress = getMeridianProgress(meridianName);
-  const doneCount = progress.done.length;
-  if (doneCount > 0 && doneCount < points.length) {
+  const introDone = progress.done.includes(INTRO_CODE);
+  const doneCount = progress.done.filter((code) => code !== INTRO_CODE).length;
+
+  if (introDone && doneCount >= points.length && points.length > 0) {
     el.sequentialProgressHint.hidden = false;
-    el.sequentialProgressHint.textContent = `上次錄到第 ${doneCount} / ${points.length} 穴，將從下一穴繼續。`;
-  } else if (doneCount >= points.length && points.length > 0) {
+    el.sequentialProgressHint.textContent = `這條經脈已經全部錄完（含總穴數口播 + ${points.length} / ${points.length} 穴）。`;
+  } else if (doneCount > 0 || introDone) {
     el.sequentialProgressHint.hidden = false;
-    el.sequentialProgressHint.textContent = `這條經脈已經全部錄完（${points.length} / ${points.length}）。`;
+    el.sequentialProgressHint.textContent = introDone
+      ? `上次錄到第 ${doneCount} / ${points.length} 穴，將從下一穴繼續。`
+      : `尚未錄製「經脈總穴數」口播，開始時會先錄這一段，再繼續錄穴位（已錄 ${doneCount} / ${points.length} 穴）。`;
   } else {
     el.sequentialProgressHint.hidden = true;
   }
-  el.reRecordMeridianBtn.hidden = doneCount === 0;
+  el.reRecordMeridianBtn.hidden = doneCount === 0 && !introDone;
 }
 
 async function populateSinglePointSelect() {
@@ -198,7 +217,7 @@ el.reRecordMeridianBtn.addEventListener('click', async () => {
   const meridianName = el.meridianSelect.value;
   if (!confirm(`確定要重錄整條「${meridianName}」嗎？之前的進度紀錄會被清除（已存在硬碟裡的舊檔案會在你重新錄製時被覆蓋）。`)) return;
   resetMeridianProgress(meridianName);
-  await refreshSequentialHint();
+  await populateMeridianSelects();
 });
 
 // ---------- Start sequential recording ----------
@@ -216,12 +235,14 @@ el.startSequentialBtn.addEventListener('click', async () => {
   if (!folderOk) return;
 
   const progress = getMeridianProgress(meridianName);
+  const introDone = progress.done.includes(INTRO_CODE);
   let startIndex = points.findIndex((p) => !progress.done.includes(p.code));
   if (startIndex === -1) startIndex = 0; // 全部錄完了，重新從頭（使用者也可以先按重錄整條經脈）
 
   state.meridianName = meridianName;
   state.points = points;
   state.index = startIndex;
+  state.stage = introDone ? 'points' : 'intro';
 
   await beginRecordingSession('sequential');
 });
@@ -245,6 +266,7 @@ el.startSingleBtn.addEventListener('click', async () => {
   state.meridianName = meridianName;
   state.points = points;
   state.index = index;
+  state.stage = 'points';
 
   await beginRecordingSession('single');
 });
@@ -271,26 +293,43 @@ async function beginRecordingSession(mode) {
   };
 
   el.recModeBadge.textContent = mode === 'sequential' ? '逐穴錄音' : '單穴錄音';
-  el.saveNextLabel.textContent = mode === 'sequential' ? '儲存並下一穴' : '儲存錄音';
+  el.saveNextLabel.textContent = mode === 'sequential' && state.stage === 'points' ? '儲存並下一穴' : '儲存錄音';
 
   showScreen('recording');
-  renderCurrentPoint();
+  if (mode === 'sequential' && state.stage === 'intro') {
+    renderIntro();
+  } else {
+    renderCurrentPoint();
+  }
   window.addEventListener('beforeunload', beforeUnloadHandler);
+}
+
+function renderIntro() {
+  const points = state.points;
+  el.recMeridianBadge.textContent = state.meridianName;
+  el.recPointName.textContent = buildIntroText(state.meridianName, points);
+  el.recPointName.classList.add('point-name--intro');
+  el.recPointProgress.textContent = '經脈總穴數口播（逐穴錄音前，先錄這一句）';
+  el.saveNextLabel.textContent = '儲存並開始逐穴錄音';
+  setStatus('ready');
 }
 
 function renderCurrentPoint() {
   const point = state.points[state.index];
   el.recMeridianBadge.textContent = state.meridianName;
   el.recPointName.textContent = point.name;
+  el.recPointName.classList.remove('point-name--intro');
   el.recPointProgress.textContent = `${state.index + 1} / ${state.points.length}`;
+  el.saveNextLabel.textContent = state.mode === 'sequential' ? '儲存並下一穴' : '儲存錄音';
   setStatus('ready');
 }
 
 function setStatus(newState) {
   el.statusLight.dataset.state = newState;
+  const isIntro = state.mode === 'sequential' && state.stage === 'intro';
   if (newState === 'ready') {
     el.statusText.textContent = 'READY';
-    el.statusHint.textContent = '請開始錄音，說出穴位名稱';
+    el.statusHint.textContent = isIntro ? '請開始錄音，唸出「經脈名稱共 N 穴」' : '請開始錄音，說出穴位名稱';
   } else if (newState === 'recording') {
     el.statusText.textContent = 'RECORDING';
     el.statusHint.textContent = '正在錄音中...';
@@ -322,6 +361,22 @@ async function saveCurrentPointAndAdvance(mode) {
     const faded = applyFadeInOut(normalized.left, normalized.right);
     const blob = encodeMp3(faded.left, faded.right);
 
+    if (mode === 'sequential' && state.stage === 'intro') {
+      const fileName = buildIntroFileName(state.meridianName, state.points);
+      const fileHandle = await state.directoryHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+
+      markPointDone(state.meridianName, INTRO_CODE);
+
+      state.stage = 'points';
+      state.saving = false;
+      el.saveNextBtn.disabled = false;
+      renderCurrentPoint();
+      return;
+    }
+
     const point = state.points[state.index];
     const fileName = buildFileName(state.meridianName, point);
     const fileHandle = await state.directoryHandle.getFileHandle(fileName, { create: true });
@@ -347,7 +402,7 @@ async function saveCurrentPointAndAdvance(mode) {
       await recorder.reset();
       window.removeEventListener('beforeunload', beforeUnloadHandler);
       showScreen('home');
-      await populateSinglePointSelect();
+      await populateMeridianSelects();
     }
   } catch (e) {
     console.error(e);
@@ -390,13 +445,12 @@ el.cancelRecordingBtn.addEventListener('click', async () => {
   await recorder.reset();
   state.saving = false;
   showScreen('home');
-  await refreshSequentialHint();
-  await populateSinglePointSelect();
+  await populateMeridianSelects();
 });
 
 el.nextMeridianBtn.addEventListener('click', async () => {
   showScreen('home');
-  await refreshSequentialHint();
+  await populateMeridianSelects();
 });
 
 function beforeUnloadHandler(e) {

@@ -81,3 +81,19 @@ export async function getPointsForMeridian(meridianName) {
 export function buildFileName(meridianName, point) {
   return `${point.code}-${meridianName}-${point.name}.mp3`;
 }
+
+// 每條經脈在正式逐穴錄音前，會先錄一段「經脈總穴數」的口播（例如「手太陰肺經共11穴」）。
+// 這個口播用 localStorage 進度追蹤時，用這個內部代碼當成一個特殊「穴位」來標記完成與否，
+// 不會跟真正的穴位代碼衝突（真正的穴位代碼不會有底線）。
+export const INTRO_CODE = '__INTRO__';
+
+// 口播存檔命名：[國際代碼前綴]-[總穴數].mp3，例如手太陰肺經（LU1~LU11）存成 LU-11.mp3
+export function buildIntroFileName(meridianName, points) {
+  const prefixMatch = points[0] ? /^([A-Za-z-]+)/.exec(points[0].code) : null;
+  const prefix = prefixMatch ? prefixMatch[1] : meridianName;
+  return `${prefix}-${points.length}.mp3`;
+}
+
+export function buildIntroText(meridianName, points) {
+  return `${meridianName}共${points.length}穴`;
+}
