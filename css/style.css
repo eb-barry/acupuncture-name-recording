@@ -236,6 +236,11 @@ select {
   margin-bottom: 10px;
 }
 
+.point-name--intro {
+  font-size: 26px;
+  letter-spacing: 1px;
+}
+
 .point-progress {
   font-size: 15px;
   color: var(--ink-soft);
