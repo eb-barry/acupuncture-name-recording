@@ -4,6 +4,7 @@ import {
   getMeridianProgress, markPointDone, resetMeridianProgress, isPointDone,
 } from './storage.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
+import { runOptimization } from './optimizer.js';
 
 const RAW_WAV_DIR = 'raw_wav';
 
@@ -32,6 +33,14 @@ const el = {
   startSequentialBtn: $('startSequentialBtn'),
   startSingleBtn: $('startSingleBtn'),
   reRecordMeridianBtn: $('reRecordMeridianBtn'),
+  modeCardOptimize: $('modeCardOptimize'),
+  optimizePicker: $('optimizePicker'),
+  optimizeProgress: $('optimizeProgress'),
+  optimizeBar: $('optimizeBar'),
+  optimizeStatus: $('optimizeStatus'),
+  optimizeResult: $('optimizeResult'),
+  startOptimizeBtn: $('startOptimizeBtn'),
+  cancelOptimizeBtn: $('cancelOptimizeBtn'),
   sequentialProgressHint: $('sequentialProgressHint'),
 
   recModeBadge: $('recModeBadge'),
@@ -208,11 +217,77 @@ function setMode(mode) {
   state.mode = mode;
   el.modeCardSequential.setAttribute('aria-pressed', String(mode === 'sequential'));
   el.modeCardSingle.setAttribute('aria-pressed', String(mode === 'single'));
+  el.modeCardOptimize.setAttribute('aria-pressed', String(mode === 'optimize'));
   el.sequentialPicker.hidden = mode !== 'sequential';
   el.singlePicker.hidden = mode !== 'single';
+  el.optimizePicker.hidden = mode !== 'optimize';
 }
 el.modeCardSequential.addEventListener('click', () => setMode('sequential'));
 el.modeCardSingle.addEventListener('click', () => setMode('single'));
+el.modeCardOptimize.addEventListener('click', () => setMode('optimize'));
+
+// ---------- 音訊優化（批次）----------
+let optimizeCancelRequested = false;
+
+function renderOptimizeResult(result) {
+  const lines = [];
+  lines.push(`${result.cancelled ? '已取消。' : '完成！'}共處理 ${result.rows.length} / ${result.total} 個檔案：正常 ${result.ok} 個，建議檢查 ${result.review.length} 個，失敗 ${result.failed.length} 個。`);
+  lines.push('成品在 certified_recording 資料夾，詳細品質報告見 optimization_report.csv。');
+  let html = lines.map((l) => `<div>${l}</div>`).join('');
+  const attention = [...result.review, ...result.failed];
+  if (attention.length > 0) {
+    html += '<div style="margin-top:6px">建議檢查／可能需要重錄：</div><ul>';
+    for (const r of attention.slice(0, 50)) {
+      const why = r.status === 'failed' ? `失敗：${r.error}` : r.status === 'no-speech' ? '整段沒有偵測到語音' : (r.flags || []).join('、');
+      html += `<li>${r.name}（${why}）</li>`;
+    }
+    if (attention.length > 50) html += `<li>…另外還有 ${attention.length - 50} 個，請看 CSV 報告</li>`;
+    html += '</ul>';
+  }
+  el.optimizeResult.innerHTML = html;
+  el.optimizeResult.hidden = false;
+}
+
+el.startOptimizeBtn.addEventListener('click', async () => {
+  const folderOk = await ensureDirectoryHandle();
+  if (!folderOk) return;
+
+  optimizeCancelRequested = false;
+  el.optimizeResult.hidden = true;
+  el.optimizeProgress.hidden = false;
+  el.optimizeBar.value = 0;
+  el.optimizeStatus.textContent = '準備中（第一次會載入降噪模型）…';
+  el.startOptimizeBtn.disabled = true;
+  el.cancelOptimizeBtn.hidden = false;
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+
+  try {
+    const result = await runOptimization(state.directoryHandle, {
+      shouldCancel: () => optimizeCancelRequested,
+      onProgress: ({ index, total, name }) => {
+        el.optimizeBar.max = total;
+        el.optimizeBar.value = index;
+        el.optimizeStatus.textContent = `處理中 ${index + 1} / ${total}：${name}`;
+      },
+    });
+    el.optimizeBar.value = el.optimizeBar.max;
+    el.optimizeStatus.textContent = result.cancelled ? '已取消' : '全部處理完成';
+    renderOptimizeResult(result);
+  } catch (e) {
+    console.error(e);
+    el.optimizeProgress.hidden = true;
+    showError(e && e.message ? e.message : '音訊優化失敗，請重試一次。');
+  } finally {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    el.startOptimizeBtn.disabled = false;
+    el.cancelOptimizeBtn.hidden = true;
+  }
+});
+
+el.cancelOptimizeBtn.addEventListener('click', () => {
+  optimizeCancelRequested = true;
+  el.optimizeStatus.textContent = '正在取消（做完手上這個檔案就會停止）…';
+});
 
 // ---------- Re-record whole meridian ----------
 el.reRecordMeridianBtn.addEventListener('click', async () => {

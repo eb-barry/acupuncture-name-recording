@@ -43,6 +43,11 @@
         <span class="mode-card__label">單穴錄音</span>
         <span class="mode-card__hint">選擇經脈與穴位，單獨錄製</span>
       </button>
+      <button class="mode-card mode-card--wide" id="modeCardOptimize" data-mode="optimize">
+        <span class="mode-card__icon">&#10024;</span>
+        <span class="mode-card__label">音訊優化</span>
+        <span class="mode-card__hint">全部錄完後，批次降噪、裁切前後空白，輸出成品 MP3</span>
+      </button>
     </div>
 
     <div id="sequentialPicker" class="field-group">
@@ -63,6 +68,27 @@
       <select id="pointSelectSingle"></select>
 
       <button id="startSingleBtn" class="btn btn--primary btn--block">開始錄音</button>
+    </div>
+
+    <div id="optimizePicker" class="field-group" hidden>
+      <div class="optimize-desc">
+        讀取所選資料夾裡 <b>raw_wav</b> 的 WAV 母帶，逐檔：<br />
+        1. 降噪，讓聲音更乾淨<br />
+        2. 剪掉穴位名稱前後的空白，前後各補 0.5 秒的純靜音<br />
+        3. 音量調整到一致<br />
+        成品 MP3 存到 <b>certified_recording</b> 資料夾（檔名同錄音、副檔名 .mp3）。
+        <b>WAV 母帶不會被修改</b>，可以放心重複執行。
+      </div>
+
+      <div id="optimizeProgress" class="optimize-progress" hidden>
+        <progress id="optimizeBar" value="0" max="1"></progress>
+        <div id="optimizeStatus" class="optimize-status"></div>
+      </div>
+
+      <div id="optimizeResult" class="optimize-result" hidden></div>
+
+      <button id="startOptimizeBtn" class="btn btn--primary btn--block">開始音訊優化</button>
+      <button id="cancelOptimizeBtn" class="btn btn--ghost btn--block" hidden>取消</button>
     </div>
   </section>
 
