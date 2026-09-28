@@ -348,3 +348,38 @@ select {
   color: var(--ink-soft);
   padding: 10px;
 }
+
+/* ---- 音訊優化 ---- */
+.mode-card--wide { grid-column: 1 / -1; }
+
+.optimize-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.optimize-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--teal);
+}
+
+.optimize-status {
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-top: 6px;
+  word-break: break-all;
+}
+
+.optimize-result {
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--teal-tint);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.optimize-result ul { margin: 6px 0 0; padding-left: 18px; }
