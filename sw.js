@@ -1,6 +1,6 @@
 // sw.js — 離線快取。更新程式碼後記得把 CACHE_NAME 的版本號往上加一，
 // 否則使用者的瀏覽器會繼續用舊的快取版本。
-const CACHE_NAME = 'acupuncture-recorder-v10';
+const CACHE_NAME = 'acupuncture-recorder-v11';
 
 const ASSETS = [
   './',
@@ -11,6 +11,7 @@ const ASSETS = [
   './js/audio-recorder.js',
   './js/points-data.js',
   './js/storage.js',
+  './js/worklet/capture-processor.js',
   './vendor/lame.min.js',
   './data/points-data.json',
   './icons/icon-192.png',
