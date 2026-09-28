@@ -64,7 +64,13 @@ export async function getSubDirectory(rootHandle, name) {
 }
 
 // ---- 錄音進度（localStorage） ----
-// 結構：{ [meridianName]: { done: [code1, code2, ...], updatedAt: number } }
+// 結構：{ [meridianName]: { done: [code1, code2, ...], updatedAt: number, resetAt?: number } }
+//
+// 進度的「事實來源」是資料夾裡實際存在的 WAV 檔（每次啟動會掃描並同步，見 sync.js），
+// localStorage 只是快取，讓畫面能立刻顯示、也讓沒有資料夾權限時還看得到上次的進度。
+//
+// resetAt：使用者按「重錄整條經脈」的時間點。重錄不會刪除硬碟上的舊檔案（舊檔會在重新錄好時被覆蓋），
+// 但掃描時「修改時間早於 resetAt」的舊檔案不算已完成，這樣重新啟動後進度才不會被舊檔案又蓋回去。
 const PROGRESS_KEY = 'acupuncture-recorder-progress';
 
 function readProgress() {
@@ -86,6 +92,10 @@ export function getMeridianProgress(meridianName) {
   return data[meridianName] || { done: [] };
 }
 
+export function getResetAt(meridianName) {
+  return getMeridianProgress(meridianName).resetAt || 0;
+}
+
 export function markPointDone(meridianName, code) {
   const data = readProgress();
   if (!data[meridianName]) data[meridianName] = { done: [] };
@@ -96,9 +106,21 @@ export function markPointDone(meridianName, code) {
   writeProgress(data);
 }
 
+// 「重錄整條經脈」：清空已完成清單，並記下重錄時間點（保留舊檔案，不刪除硬碟上的母帶）
 export function resetMeridianProgress(meridianName) {
   const data = readProgress();
-  delete data[meridianName];
+  data[meridianName] = { done: [], updatedAt: Date.now(), resetAt: Date.now() };
+  writeProgress(data);
+}
+
+// 用掃描結果整批取代各經脈的已完成清單（保留各自的 resetAt）。
+// doneByMeridian：{ [meridianName]: [code, ...] }
+export function replaceAllProgress(doneByMeridian) {
+  const data = readProgress();
+  for (const [name, done] of Object.entries(doneByMeridian)) {
+    const prev = data[name] || {};
+    data[name] = { ...prev, done, updatedAt: Date.now() };
+  }
   writeProgress(data);
 }
 

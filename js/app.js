@@ -1,8 +1,9 @@
 import { getMeridianNames, getPointsForMeridian, buildWavFileName, buildIntroWavFileName, buildIntroText, INTRO_CODE } from './points-data.js';
 import {
   saveDirectoryHandle, loadDirectoryHandle, verifyPermission, getSubDirectory,
-  getMeridianProgress, markPointDone, resetMeridianProgress, isPointDone,
+  getMeridianProgress, getResetAt, markPointDone, resetMeridianProgress, replaceAllProgress, isPointDone,
 } from './storage.js';
+import { scanRecordedFiles } from './sync.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
 import { runOptimization } from './optimizer.js';
 
@@ -33,6 +34,8 @@ const el = {
   startSequentialBtn: $('startSequentialBtn'),
   startSingleBtn: $('startSingleBtn'),
   reRecordMeridianBtn: $('reRecordMeridianBtn'),
+  syncStatus: $('syncStatus'),
+  syncBtn: $('syncBtn'),
   modeCardOptimize: $('modeCardOptimize'),
   optimizePicker: $('optimizePicker'),
   optimizeProgress: $('optimizeProgress'),
@@ -141,6 +144,68 @@ function promptForFolder() {
 
 el.settingsBtn.addEventListener('click', async () => {
   await promptForFolder();
+});
+
+// ---------- 與資料夾同步錄音進度 ----------
+// 進度的事實來源是資料夾裡實際存在的 WAV 母帶。啟動、回到首頁、開始錄音前都會掃描，
+// 使用者手動刪除或補進檔案，進度與經脈清單的 ✅ 都會跟著更新。
+function setSyncStatus(kind, info = {}) {
+  let text = '';
+  if (kind === 'none') {
+    text = '尚未選擇儲存資料夾。按「重新掃描資料夾」選擇後，進度會依資料夾裡實際的錄音檔顯示。';
+  } else if (kind === 'need-permission') {
+    text = '目前顯示的是上次記錄的進度，尚未與資料夾比對。按「重新掃描資料夾」確認權限後就會更新。';
+  } else if (kind === 'synced') {
+    const t = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    text = info.rawDirMissing
+      ? `已與資料夾同步（${t}）：還沒有 raw_wav 資料夾（尚未錄過音）。`
+      : `已與資料夾同步（${t}）：找到 ${info.wavFiles} 個 WAV 母帶。`;
+    if (info.legacyMp3 > 0) {
+      text += ` 另有 ${info.legacyMp3} 個舊版 MP3（沒有 WAV 母帶，需重錄才能做音訊優化，不列入進度）。`;
+    }
+  } else if (kind === 'error') {
+    text = `掃描資料夾失敗：${info.message || '未知錯誤'}`;
+  }
+  el.syncStatus.textContent = text;
+}
+
+// 只在「已經有資料夾權限」時掃描（不會自己跳出權限提示，權限提示必須由使用者點擊觸發）。
+async function syncProgressFromDisk() {
+  if (!state.directoryHandle) {
+    setSyncStatus('none');
+    return false;
+  }
+  try {
+    if (!(await verifyPermission(state.directoryHandle, false))) {
+      setSyncStatus('need-permission');
+      return false;
+    }
+    const names = await getMeridianNames();
+    const meridians = new Map();
+    for (const name of names) meridians.set(name, await getPointsForMeridian(name));
+    const { doneByMeridian, stats } = await scanRecordedFiles(state.directoryHandle, meridians, getResetAt);
+    replaceAllProgress(doneByMeridian);
+    setSyncStatus('synced', stats);
+    return true;
+  } catch (e) {
+    console.error(e);
+    setSyncStatus('error', {
+      message: e && e.name === 'NotFoundError' ? '找不到儲存資料夾（可能被移動或刪除了），請重新選擇資料夾。' : e && e.message,
+    });
+    return false;
+  }
+}
+
+// 回到首頁：先與資料夾同步，再重畫經脈清單與提示
+async function refreshHome() {
+  await syncProgressFromDisk();
+  await populateMeridianSelects();
+}
+
+el.syncBtn.addEventListener('click', async () => {
+  const folderOk = await ensureDirectoryHandle();
+  if (!folderOk) return;
+  await refreshHome();
 });
 
 // ---------- Populate dropdowns ----------
@@ -292,9 +357,9 @@ el.cancelOptimizeBtn.addEventListener('click', () => {
 // ---------- Re-record whole meridian ----------
 el.reRecordMeridianBtn.addEventListener('click', async () => {
   const meridianName = el.meridianSelect.value;
-  if (!confirm(`確定要重錄整條「${meridianName}」嗎？之前的進度紀錄會被清除（已存在硬碟裡的舊檔案會在你重新錄製時被覆蓋）。`)) return;
+  if (!confirm(`確定要重錄整條「${meridianName}」（含經脈總穴數口播）嗎？\n\n這條經脈會變成「尚未錄製」，硬碟裡的舊檔案不會被刪除，會在你重新錄好每一個時被覆蓋。`)) return;
   resetMeridianProgress(meridianName);
-  await populateMeridianSelects();
+  await refreshHome();
 });
 
 // ---------- Start sequential recording ----------
@@ -310,11 +375,21 @@ el.startSequentialBtn.addEventListener('click', async () => {
 
   const folderOk = await ensureDirectoryHandle();
   if (!folderOk) return;
+  await syncProgressFromDisk(); // 開始前先以資料夾裡實際的檔案為準
 
-  const progress = getMeridianProgress(meridianName);
-  const introDone = progress.done.includes(INTRO_CODE);
+  let progress = getMeridianProgress(meridianName);
+  let introDone = progress.done.includes(INTRO_CODE);
   let startIndex = points.findIndex((p) => !progress.done.includes(p.code));
-  if (startIndex === -1) startIndex = 0; // 全部錄完了，重新從頭（使用者也可以先按重錄整條經脈）
+
+  if (startIndex === -1 && introDone) {
+    // 口播與所有穴位都已經有檔案：視為使用者想整條重錄
+    if (!confirm(`「${meridianName}」已經全部錄完了。要重新錄整條（含總穴數口播）嗎？\n舊檔案會在重新錄好時被覆蓋。`)) return;
+    resetMeridianProgress(meridianName);
+    progress = getMeridianProgress(meridianName);
+    introDone = false;
+    startIndex = 0;
+  }
+  if (startIndex === -1) startIndex = 0; // 只缺口播：錄完口播後會直接結束（穴位都已完成）
 
   state.meridianName = meridianName;
   state.points = points;
@@ -339,6 +414,7 @@ el.startSingleBtn.addEventListener('click', async () => {
 
   const folderOk = await ensureDirectoryHandle();
   if (!folderOk) return;
+  await syncProgressFromDisk();
 
   state.meridianName = meridianName;
   state.points = points;
@@ -379,6 +455,15 @@ async function beginRecordingSession(mode) {
     renderCurrentPoint();
   }
   window.addEventListener('beforeunload', beforeUnloadHandler);
+}
+
+// 從 fromIndex 開始，找第一個還沒錄的穴位（依國際代碼順序）；都錄完了回傳 -1
+function findNextUndoneIndex(fromIndex) {
+  const done = getMeridianProgress(state.meridianName).done;
+  for (let i = fromIndex; i < state.points.length; i++) {
+    if (!done.includes(state.points[i].code)) return i;
+  }
+  return -1;
 }
 
 function renderIntro() {
@@ -450,7 +535,13 @@ async function saveCurrentPointAndAdvance(mode) {
       state.stage = 'points';
       state.saving = false;
       el.saveNextBtn.disabled = false;
-      renderCurrentPoint();
+      const firstUndone = findNextUndoneIndex(0);
+      if (firstUndone === -1) {
+        await endSequentialSession(); // 穴位都已經錄好，只是補錄口播
+      } else {
+        state.index = firstUndone;
+        renderCurrentPoint();
+      }
       return;
     }
 
@@ -464,13 +555,15 @@ async function saveCurrentPointAndAdvance(mode) {
     markPointDone(state.meridianName, point.code);
 
     if (mode === 'sequential') {
-      if (state.index + 1 < state.points.length) {
-        state.index += 1;
+      // 跳到下一個「還沒錄」的穴位：資料夾裡已存在的穴位不會被重錄（例如只補錄被刪掉的那幾個）
+      const next = findNextUndoneIndex(state.index + 1);
+      if (next !== -1) {
+        state.index = next;
         state.saving = false;
         el.saveNextBtn.disabled = false;
         renderCurrentPoint();
       } else {
-        endSequentialSession();
+        await endSequentialSession();
       }
     } else {
       // 單穴模式：存完就回到選擇畫面
@@ -479,7 +572,7 @@ async function saveCurrentPointAndAdvance(mode) {
       await recorder.reset();
       window.removeEventListener('beforeunload', beforeUnloadHandler);
       showScreen('home');
-      await populateMeridianSelects();
+      await refreshHome();
     }
   } catch (e) {
     console.error(e);
@@ -522,12 +615,12 @@ el.cancelRecordingBtn.addEventListener('click', async () => {
   await recorder.reset();
   state.saving = false;
   showScreen('home');
-  await populateMeridianSelects();
+  await refreshHome();
 });
 
 el.nextMeridianBtn.addEventListener('click', async () => {
   showScreen('home');
-  await populateMeridianSelects();
+  await refreshHome();
 });
 
 function beforeUnloadHandler(e) {
@@ -546,7 +639,7 @@ async function init() {
   } catch (e) {
     console.error(e);
   }
-  await populateMeridianSelects();
+  await refreshHome(); // 每次啟動都先與資料夾裡實際的錄音檔同步
   setMode('sequential');
   showScreen('home');
 
