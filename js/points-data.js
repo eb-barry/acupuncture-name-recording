@@ -82,6 +82,12 @@ export function buildFileName(meridianName, point) {
   return `${point.code}-${meridianName}-${point.name}.mp3`;
 }
 
+// 錄音當下存的是未經處理的 WAV 母帶（副檔名不同，其餘規則相同），
+// 「音訊優化」批次處理完的最終成品才是同名的 .mp3。
+export function buildWavFileName(meridianName, point) {
+  return `${point.code}-${meridianName}-${point.name}.wav`;
+}
+
 // 每條經脈在正式逐經脈錄音前，會先錄一段「經脈總穴數」的口播（例如「手太陰肺經共11穴」）。
 // 這個口播用 localStorage 進度追蹤時，用這個內部代碼當成一個特殊「穴位」來標記完成與否，
 // 不會跟真正的穴位代碼衝突（真正的穴位代碼不會有底線）。
@@ -92,6 +98,12 @@ export function buildIntroFileName(meridianName, points) {
   const prefixMatch = points[0] ? /^([A-Za-z-]+)/.exec(points[0].code) : null;
   const prefix = prefixMatch ? prefixMatch[1] : meridianName;
   return `${prefix}-${points.length}.mp3`;
+}
+
+export function buildIntroWavFileName(meridianName, points) {
+  const prefixMatch = points[0] ? /^([A-Za-z-]+)/.exec(points[0].code) : null;
+  const prefix = prefixMatch ? prefixMatch[1] : meridianName;
+  return `${prefix}-${points.length}.wav`;
 }
 
 export function buildIntroText(meridianName, points) {

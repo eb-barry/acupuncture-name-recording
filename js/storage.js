@@ -58,6 +58,11 @@ export async function verifyPermission(handle, requestIfNeeded = true) {
   return false;
 }
 
+// 在使用者選定的資料夾底下，取得（不存在就建立）一個子資料夾，例如 raw_wav / certified_recording
+export async function getSubDirectory(rootHandle, name) {
+  return rootHandle.getDirectoryHandle(name, { create: true });
+}
+
 // ---- 錄音進度（localStorage） ----
 // 結構：{ [meridianName]: { done: [code1, code2, ...], updatedAt: number } }
 const PROGRESS_KEY = 'acupuncture-recorder-progress';

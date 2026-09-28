@@ -11,15 +11,29 @@
 // 本專案明確以 Chrome 為目標瀏覽器，選擇它是為了實作簡單；未來若要換成
 // AudioWorklet，只需要替換 CaptureEngine 內部實作，對外介面不用變）。
 
-const SAMPLE_RATE = 44100;
+// audio-recorder.js
+// 「方案 B」：從使用者一進入某個穴位的錄音畫面開始，就用 Web Audio API 連續擷取原始 PCM
+// 資料到記憶體緩衝區裡，不中斷；每次按 Enter 只是記錄一個「切割點」，把上一個切割點到這次
+// 之間的音訊切出來，直接存成 WAV 母帶（不在這裡做裁切/正規化/降噪——這些留給「音訊優化」
+// 批次功能，用完整、未經處理過的原始音訊來做，效果比較好、也比較安全）。
+//
+// 注意：緩衝區的生命週期是「一條經脈的錄音 session」，不是整個 App 生命週期，
+// 避免長時間累積導致記憶體用量過大。切換到新的經脈或關閉頁面時務必呼叫 reset()。
+//
+// 擷取音訊用 AudioWorkletNode（跑在獨立的「音訊執行緒」），取代舊版的 ScriptProcessorNode
+// （官方已標示 deprecated，且跑在主執行緒上，主執行緒忙的時候容易漏格產生爆音）。
+//
+// 取樣率固定用 48000Hz：這不只是網頁播放的常見取樣率，更重要的是「音訊優化」批次功能用的
+// RNNoise 降噪模型原生就是在 48kHz 下訓練的，統一用 48kHz 錄音可以完全避開重新取樣的損耗。
+
+const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
-const BUFFER_SIZE = 4096;
 
 export class ContinuousRecorder {
   constructor() {
     this.audioContext = null;
     this.sourceNode = null;
-    this.processorNode = null;
+    this.workletNode = null;
     this.stream = null;
     this.leftChunks = [];
     this.rightChunks = [];
@@ -41,18 +55,18 @@ export class ContinuousRecorder {
     });
 
     this.audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    await this.audioContext.audioWorklet.addModule('./js/worklet/capture-processor.js');
+
     this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
+    this.workletNode = new AudioWorkletNode(this.audioContext, 'capture-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [CHANNELS],
+    });
 
-    // 有些裝置的麥克風只有單聲道；createScriptProcessor 的輸入聲道數要跟來源一致，
-    // 所以用來源的實際聲道數，輸出時再視需要補成立體聲。
-    const inputChannels = this.sourceNode.channelCount || 1;
-    this.processorNode = this.audioContext.createScriptProcessor(BUFFER_SIZE, inputChannels, CHANNELS);
-
-    this.processorNode.onaudioprocess = (event) => {
+    this.workletNode.port.onmessage = (event) => {
       if (!this.running) return;
-      const input = event.inputBuffer;
-      const left = new Float32Array(input.getChannelData(0));
-      const right = input.numberOfChannels > 1 ? new Float32Array(input.getChannelData(1)) : new Float32Array(left);
+      const { left, right } = event.data;
       this.leftChunks.push(left);
       this.rightChunks.push(right);
       this.totalSamples += left.length;
@@ -67,12 +81,12 @@ export class ContinuousRecorder {
       }
     };
 
-    this.sourceNode.connect(this.processorNode);
-    // ScriptProcessorNode 必須接到 destination 才會觸發 onaudioprocess（即使不想真的播放出來），
+    this.sourceNode.connect(this.workletNode);
+    // AudioWorkletNode 必須接到 destination 才會持續被拉動處理（即使不想真的播放出來），
     // 所以接一個靜音的 GainNode，避免使用者聽到自己講話的回音。
     const silentGain = this.audioContext.createGain();
     silentGain.gain.value = 0;
-    this.processorNode.connect(silentGain);
+    this.workletNode.connect(silentGain);
     silentGain.connect(this.audioContext.destination);
 
     this.running = true;
@@ -100,16 +114,17 @@ export class ContinuousRecorder {
   // 完全停止並釋放麥克風、AudioContext，清空緩衝區
   async reset() {
     this.running = false;
-    if (this.processorNode) {
-      this.processorNode.disconnect();
-      this.processorNode.onaudioprocess = null;
+    if (this.workletNode) {
+      this.workletNode.port.postMessage('stop');
+      this.workletNode.port.onmessage = null;
+      this.workletNode.disconnect();
     }
     if (this.sourceNode) this.sourceNode.disconnect();
     if (this.audioContext) await this.audioContext.close().catch(() => {});
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     this.audioContext = null;
     this.sourceNode = null;
-    this.processorNode = null;
+    this.workletNode = null;
     this.stream = null;
     this.leftChunks = [];
     this.rightChunks = [];
@@ -254,4 +269,45 @@ export function hasSpeech(left, right) {
     if (Math.max(Math.abs(left[i]), Math.abs(right[i])) >= SILENCE_THRESHOLD) return true;
   }
   return false;
+}
+
+// 把立體聲 Float32 PCM 編碼成標準的 16-bit PCM WAV（無壓縮），用來存錄音母帶。
+// WAV 只是加個檔頭、資料本身不需要任何壓縮運算，所以存檔當下的負擔比 MP3 編碼輕很多。
+export function encodeWav(left, right, sampleRate = SAMPLE_RATE) {
+  const leftInt16 = floatTo16BitPCM(left);
+  const rightInt16 = floatTo16BitPCM(right);
+  const numFrames = leftInt16.length;
+  const bytesPerSample = 2;
+  const blockAlign = CHANNELS * bytesPerSample;
+  const dataSize = numFrames * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, CHANNELS, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    view.setInt16(offset, leftInt16[i], true);
+    offset += 2;
+    view.setInt16(offset, rightInt16[i], true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
 }

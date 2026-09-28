@@ -1,9 +1,11 @@
-import { getMeridianNames, getPointsForMeridian, buildFileName, buildIntroFileName, buildIntroText, INTRO_CODE } from './points-data.js';
+import { getMeridianNames, getPointsForMeridian, buildWavFileName, buildIntroWavFileName, buildIntroText, INTRO_CODE } from './points-data.js';
 import {
-  saveDirectoryHandle, loadDirectoryHandle, verifyPermission,
+  saveDirectoryHandle, loadDirectoryHandle, verifyPermission, getSubDirectory,
   getMeridianProgress, markPointDone, resetMeridianProgress, isPointDone,
 } from './storage.js';
-import { ContinuousRecorder, trimSilence, normalizeVolume, applyFadeInOut, encodeMp3, hasSpeech } from './audio-recorder.js';
+import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
+
+const RAW_WAV_DIR = 'raw_wav';
 
 // ---------- DOM refs ----------
 const $ = (id) => document.getElementById(id);
@@ -356,14 +358,14 @@ async function saveCurrentPointAndAdvance(mode) {
         return;
       }
     }
-    const trimmed = trimSilence(left, right);
-    const normalized = normalizeVolume(trimmed.left, trimmed.right);
-    const faded = applyFadeInOut(normalized.left, normalized.right);
-    const blob = encodeMp3(faded.left, faded.right);
+    // 錄音當下只存原始 WAV 母帶（不裁切、不正規化、不降噪），這些處理留給「音訊優化」批次功能，
+    // 用完整未處理過的音訊來做效果更好，也才有真正的原始素材可以重新處理、不用重錄。
+    const blob = encodeWav(left, right);
+    const rawWavDir = await getSubDirectory(state.directoryHandle, RAW_WAV_DIR);
 
     if (mode === 'sequential' && state.stage === 'intro') {
-      const fileName = buildIntroFileName(state.meridianName, state.points);
-      const fileHandle = await state.directoryHandle.getFileHandle(fileName, { create: true });
+      const fileName = buildIntroWavFileName(state.meridianName, state.points);
+      const fileHandle = await rawWavDir.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
@@ -378,8 +380,8 @@ async function saveCurrentPointAndAdvance(mode) {
     }
 
     const point = state.points[state.index];
-    const fileName = buildFileName(state.meridianName, point);
-    const fileHandle = await state.directoryHandle.getFileHandle(fileName, { create: true });
+    const fileName = buildWavFileName(state.meridianName, point);
+    const fileHandle = await rawWavDir.getFileHandle(fileName, { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(blob);
     await writable.close();
