@@ -37,7 +37,7 @@
       <button id="syncBtn" class="btn btn--ghost btn--small">重新掃描資料夾</button>
     </div>
 
-    <div class="mode-cards">
+    <div class="mode-cards mode-cards--4">
       <button class="mode-card" id="modeCardSequential" data-mode="sequential">
         <span class="mode-card__icon">&#9776;</span>
         <span class="mode-card__label">逐經脈錄音</span>
@@ -48,10 +48,15 @@
         <span class="mode-card__label">單穴錄音</span>
         <span class="mode-card__hint">選擇經脈與穴位，單獨錄製</span>
       </button>
-      <button class="mode-card mode-card--wide" id="modeCardOptimize" data-mode="optimize">
+      <button class="mode-card" id="modeCardOptimize" data-mode="optimize">
         <span class="mode-card__icon">&#10024;</span>
         <span class="mode-card__label">音訊優化</span>
-        <span class="mode-card__hint">全部錄完後，批次降噪、裁切前後空白，輸出成品 MP3</span>
+        <span class="mode-card__hint">批次降噪、裁切，輸出成品 MP3</span>
+      </button>
+      <button class="mode-card" id="modeCardListen" data-mode="listen">
+        <span class="mode-card__icon">&#9835;</span>
+        <span class="mode-card__label">經穴試聽</span>
+        <span class="mode-card__hint">播放已完成優化的穴位錄音</span>
       </button>
     </div>
 
@@ -95,6 +100,58 @@
       <button id="startOptimizeBtn" class="btn btn--primary btn--block">開始音訊優化</button>
       <button id="cancelOptimizeBtn" class="btn btn--ghost btn--block" hidden>取消</button>
     </div>
+
+    <div id="listenPicker" class="field-group" hidden>
+      <div class="mode-cards mode-cards--2">
+        <button class="mode-card mode-card--sub" id="listenSubMeridian" data-listen-sub="meridian">
+          <span class="mode-card__label">逐經脈試聽</span>
+          <span class="mode-card__hint">依 WHO 標準代碼順序播放整條經脈</span>
+        </button>
+        <button class="mode-card mode-card--sub" id="listenSubSingle" data-listen-sub="single">
+          <span class="mode-card__label">單穴試聽</span>
+          <span class="mode-card__hint">選一個穴位播放</span>
+        </button>
+      </div>
+
+      <div id="listenMeridianOnly">
+        <label for="meridianSelectListen">經脈</label>
+        <select id="meridianSelectListen"></select>
+      </div>
+
+      <div id="listenPointOnly" hidden>
+        <label for="meridianSelectListenSingle">經脈</label>
+        <select id="meridianSelectListenSingle"></select>
+        <label for="pointSelectListen">穴位</label>
+        <select id="pointSelectListen"></select>
+      </div>
+
+      <button id="startListenBtn" class="btn btn--primary btn--block">開始試聽</button>
+    </div>
+  </section>
+
+  <!-- ========== 經穴試聽：播放畫面 ========== -->
+  <section id="screen-listen" class="screen" hidden>
+    <div class="badges">
+      <span class="badge badge--mode" id="listenModeBadge">逐經脈試聽</span>
+      <span class="badge-label">經脈</span>
+      <span class="badge badge--meridian" id="listenMeridianBadge">手太陰肺經</span>
+    </div>
+
+    <div class="point-display">
+      <div class="point-name" id="listenPointName">中府</div>
+      <div class="point-progress" id="listenPointProgress">1 / 11</div>
+    </div>
+
+    <audio id="listenAudio" preload="auto"></audio>
+
+    <div class="listen-controls">
+      <button id="listenPrevBtn" class="btn btn--ghost" title="上一個">&#9664;&#9664;</button>
+      <button id="listenPlayPauseBtn" class="btn btn--primary btn--large" title="播放/暫停">&#9654;</button>
+      <button id="listenNextBtn" class="btn btn--ghost" title="下一個">&#9654;&#9654;</button>
+    </div>
+    <div class="status-hint" id="listenHint">準備播放…</div>
+
+    <button id="listenBackBtn" class="btn btn--ghost btn--block">返回</button>
   </section>
 
   <!-- ========== 逐穴 / 單穴 錄音畫面（共用結構） ========== -->

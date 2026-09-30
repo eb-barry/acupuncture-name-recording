@@ -5,7 +5,8 @@ import {
 } from './storage.js';
 import { scanRecordedFiles } from './sync.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
-import { runOptimization } from './optimizer.js';
+import { runOptimization, CERTIFIED_DIR } from './optimizer.js';
+import { buildMeridianPlaylist, buildSinglePlaylist, getCertifiedDir, loadAudioUrl } from './listen.js';
 
 const RAW_WAV_DIR = 'raw_wav';
 
@@ -16,6 +17,7 @@ const screens = {
   home: $('screen-home'),
   recording: $('screen-recording'),
   complete: $('screen-complete'),
+  listen: $('screen-listen'),
 };
 
 const el = {
@@ -46,6 +48,28 @@ const el = {
   cancelOptimizeBtn: $('cancelOptimizeBtn'),
   sequentialProgressHint: $('sequentialProgressHint'),
 
+  modeCardListen: $('modeCardListen'),
+  listenPicker: $('listenPicker'),
+  listenSubMeridian: $('listenSubMeridian'),
+  listenSubSingle: $('listenSubSingle'),
+  listenMeridianOnly: $('listenMeridianOnly'),
+  listenPointOnly: $('listenPointOnly'),
+  meridianSelectListen: $('meridianSelectListen'),
+  meridianSelectListenSingle: $('meridianSelectListenSingle'),
+  pointSelectListen: $('pointSelectListen'),
+  startListenBtn: $('startListenBtn'),
+
+  listenModeBadge: $('listenModeBadge'),
+  listenMeridianBadge: $('listenMeridianBadge'),
+  listenPointName: $('listenPointName'),
+  listenPointProgress: $('listenPointProgress'),
+  listenAudio: $('listenAudio'),
+  listenPrevBtn: $('listenPrevBtn'),
+  listenPlayPauseBtn: $('listenPlayPauseBtn'),
+  listenNextBtn: $('listenNextBtn'),
+  listenHint: $('listenHint'),
+  listenBackBtn: $('listenBackBtn'),
+
   recModeBadge: $('recModeBadge'),
   recMeridianBadge: $('recMeridianBadge'),
   recPointName: $('recPointName'),
@@ -68,13 +92,22 @@ const el = {
 
 // ---------- App state ----------
 const state = {
-  mode: 'sequential', // 'sequential' | 'single'
+  mode: 'sequential', // 'sequential' | 'single' | 'optimize' | 'listen'
   stage: 'points', // 'intro' | 'points'（單穴模式一律是 'points'）
   meridianName: null,
   points: [],
   index: 0,
   directoryHandle: null,
   saving: false,
+  listenSub: 'meridian', // 'meridian' | 'single'
+};
+
+// 經穴試聽的播放狀態（跟上面錄音用的 state 分開，播放不會動到錄音進度）
+const listenState = {
+  playlist: [],
+  index: -1,
+  currentUrl: null,
+  isPlaying: false,
 };
 
 const recorder = new ContinuousRecorder();
@@ -220,7 +253,7 @@ async function isMeridianFullyDone(meridianName) {
 
 async function populateMeridianSelects() {
   const names = await getMeridianNames();
-  for (const select of [el.meridianSelect, el.meridianSelectSingle]) {
+  for (const select of [el.meridianSelect, el.meridianSelectSingle, el.meridianSelectListen, el.meridianSelectListenSingle]) {
     const previousValue = select.value;
     select.innerHTML = '';
     for (const name of names) {
@@ -228,6 +261,7 @@ async function populateMeridianSelects() {
       opt.value = name;
       // 原生 <select> 的 <option> 在 Chrome 裡幾乎不吃自訂顏色（下拉選單清單是瀏覽器用系統原生元件畫的），
       // 沒辦法把勾勾局部染成紅色；改用「✅」這個內建就有顏色的 emoji 字元當作完成標記，任何瀏覽器都能正確顯示。
+      // 這個「✅」代表的是錄音進度（raw_wav），不是試聽用的「有沒有優化成品」，兩件事分開看。
       const done = await isMeridianFullyDone(name);
       opt.textContent = done ? `✅ ${name}` : name;
       select.appendChild(opt);
@@ -236,6 +270,7 @@ async function populateMeridianSelects() {
   }
   await refreshSequentialHint();
   await populateSinglePointSelect();
+  await populateListenPointSelect();
 }
 
 async function refreshSequentialHint() {
@@ -274,8 +309,33 @@ async function populateSinglePointSelect() {
   }
 }
 
+async function populateListenPointSelect() {
+  const meridianName = el.meridianSelectListenSingle.value;
+  if (!meridianName) return;
+  const points = await getPointsForMeridian(meridianName);
+  el.pointSelectListen.innerHTML = '';
+  for (const p of points) {
+    const opt = document.createElement('option');
+    opt.value = p.code;
+    opt.textContent = `${p.code}　${p.name}`;
+    el.pointSelectListen.appendChild(opt);
+  }
+}
+
 el.meridianSelect.addEventListener('change', refreshSequentialHint);
 el.meridianSelectSingle.addEventListener('change', populateSinglePointSelect);
+el.meridianSelectListenSingle.addEventListener('change', populateListenPointSelect);
+
+// ---------- 經穴試聽：子模式切換（逐經脈 / 單穴）----------
+function setListenSub(sub) {
+  state.listenSub = sub;
+  el.listenSubMeridian.setAttribute('aria-pressed', String(sub === 'meridian'));
+  el.listenSubSingle.setAttribute('aria-pressed', String(sub === 'single'));
+  el.listenMeridianOnly.hidden = sub !== 'meridian';
+  el.listenPointOnly.hidden = sub !== 'single';
+}
+el.listenSubMeridian.addEventListener('click', () => setListenSub('meridian'));
+el.listenSubSingle.addEventListener('click', () => setListenSub('single'));
 
 // ---------- Mode cards ----------
 function setMode(mode) {
@@ -283,13 +343,16 @@ function setMode(mode) {
   el.modeCardSequential.setAttribute('aria-pressed', String(mode === 'sequential'));
   el.modeCardSingle.setAttribute('aria-pressed', String(mode === 'single'));
   el.modeCardOptimize.setAttribute('aria-pressed', String(mode === 'optimize'));
+  el.modeCardListen.setAttribute('aria-pressed', String(mode === 'listen'));
   el.sequentialPicker.hidden = mode !== 'sequential';
   el.singlePicker.hidden = mode !== 'single';
   el.optimizePicker.hidden = mode !== 'optimize';
+  el.listenPicker.hidden = mode !== 'listen';
 }
 el.modeCardSequential.addEventListener('click', () => setMode('sequential'));
 el.modeCardSingle.addEventListener('click', () => setMode('single'));
 el.modeCardOptimize.addEventListener('click', () => setMode('optimize'));
+el.modeCardListen.addEventListener('click', () => setMode('listen'));
 
 // ---------- 音訊優化（批次）----------
 let optimizeCancelRequested = false;
@@ -352,6 +415,143 @@ el.startOptimizeBtn.addEventListener('click', async () => {
 el.cancelOptimizeBtn.addEventListener('click', () => {
   optimizeCancelRequested = true;
   el.optimizeStatus.textContent = '正在取消（做完手上這個檔案就會停止）…';
+});
+
+// ---------- 經穴試聽 ----------
+// 只播放 certified_recording 裡「音訊優化」處理完的成品；跟錄音、優化都不同，這裡完全不寫檔。
+el.startListenBtn.addEventListener('click', async () => {
+  const folderOk = await ensureDirectoryHandle();
+  if (!folderOk) return;
+
+  const certifiedDir = await getCertifiedDir(state.directoryHandle);
+  if (!certifiedDir) {
+    showError(`還沒有任何已完成優化的成品。請先錄音，再用「音訊優化」處理過後才能試聽（成品會在 ${CERTIFIED_DIR} 資料夾）。`);
+    return;
+  }
+
+  let playlist, modeLabel;
+  if (state.listenSub === 'meridian') {
+    const meridianName = el.meridianSelectListen.value;
+    if (!meridianName) return;
+    const points = await getPointsForMeridian(meridianName);
+    playlist = await buildMeridianPlaylist(certifiedDir, meridianName, points);
+    modeLabel = '逐經脈試聽';
+    listenState.meridianName = meridianName;
+  } else {
+    const meridianName = el.meridianSelectListenSingle.value;
+    const code = el.pointSelectListen.value;
+    if (!meridianName || !code) return;
+    const points = await getPointsForMeridian(meridianName);
+    const point = points.find((p) => p.code === code);
+    if (!point) return;
+    playlist = await buildSinglePlaylist(certifiedDir, meridianName, point);
+    modeLabel = '單穴試聽';
+    listenState.meridianName = meridianName;
+  }
+
+  if (!playlist.some((item) => item.exists)) {
+    showError('這個範圍裡的穴位都還沒有優化過的成品，請先執行「音訊優化」。');
+    return;
+  }
+
+  listenState.playlist = playlist;
+  listenState.certifiedDir = certifiedDir;
+  el.listenModeBadge.textContent = modeLabel;
+  el.listenMeridianBadge.textContent = listenState.meridianName;
+
+  showScreen('listen');
+  const firstIndex = playlist.findIndex((item) => item.exists);
+  await loadListenIndex(firstIndex, { autoplay: true });
+});
+
+function listenPointLabel(item, playlist) {
+  if (item.code === INTRO_CODE) return '口播';
+  const pointsOnly = playlist.filter((p) => p.code !== INTRO_CODE);
+  const pos = pointsOnly.findIndex((p) => p.code === item.code);
+  return `${pos + 1} / ${pointsOnly.length}`;
+}
+
+async function loadListenIndex(index, { autoplay = false } = {}) {
+  const { playlist } = listenState;
+  if (index < 0) { el.listenHint.textContent = '已經是第一個了。'; return; }
+  if (index >= playlist.length) {
+    el.listenAudio.pause();
+    el.listenHint.textContent = '已經播完這個範圍的最後一個了。';
+    return;
+  }
+  const item = playlist[index];
+
+  if (!item.exists) {
+    // 缺檔：跳過，往同一方向找下一個存在的
+    const dir = index >= listenState.index ? 1 : -1;
+    const next = index + dir;
+    if (next < 0 || next >= playlist.length) {
+      el.listenHint.textContent = '這個方向沒有更多已完成優化的穴位了。';
+      return;
+    }
+    await loadListenIndex(next, { autoplay });
+    return;
+  }
+
+  listenState.index = index;
+  el.listenPointName.textContent = item.label;
+  el.listenPointProgress.textContent = listenPointLabel(item, playlist);
+
+  if (listenState.currentUrl) URL.revokeObjectURL(listenState.currentUrl);
+  try {
+    listenState.currentUrl = await loadAudioUrl(listenState.certifiedDir, item.fileName);
+  } catch (e) {
+    console.error(e);
+    el.listenHint.textContent = `讀取「${item.fileName}」失敗，可能檔案被移動或刪除了。`;
+    return;
+  }
+  el.listenAudio.src = listenState.currentUrl;
+
+  const missingCount = playlist.filter((p) => !p.exists).length;
+  el.listenHint.textContent = missingCount > 0 ? `（這個範圍裡還有 ${missingCount} 個穴位尚未優化，會自動跳過）` : '';
+
+  if (autoplay) {
+    try {
+      await el.listenAudio.play();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
+
+function updatePlayPauseIcon() {
+  el.listenPlayPauseBtn.innerHTML = listenState.isPlaying ? '&#10074;&#10074;' : '&#9654;';
+}
+
+el.listenPlayPauseBtn.addEventListener('click', async () => {
+  if (el.listenAudio.paused) {
+    try { await el.listenAudio.play(); } catch (e) { console.error(e); }
+  } else {
+    el.listenAudio.pause();
+  }
+});
+el.listenAudio.addEventListener('play', () => { listenState.isPlaying = true; updatePlayPauseIcon(); });
+el.listenAudio.addEventListener('pause', () => { listenState.isPlaying = false; updatePlayPauseIcon(); });
+
+el.listenPrevBtn.addEventListener('click', () => {
+  loadListenIndex(listenState.index - 1, { autoplay: listenState.isPlaying });
+});
+el.listenNextBtn.addEventListener('click', () => {
+  loadListenIndex(listenState.index + 1, { autoplay: listenState.isPlaying });
+});
+
+// 逐經脈試聽時，播完自動接下一個；單穴試聽只有一筆，播完自然停止（沒有下一筆可跳）
+el.listenAudio.addEventListener('ended', () => {
+  loadListenIndex(listenState.index + 1, { autoplay: true });
+});
+
+el.listenBackBtn.addEventListener('click', () => {
+  el.listenAudio.pause();
+  el.listenAudio.removeAttribute('src');
+  if (listenState.currentUrl) { URL.revokeObjectURL(listenState.currentUrl); listenState.currentUrl = null; }
+  listenState.playlist = [];
+  listenState.index = -1;
+  showScreen('home');
 });
 
 // ---------- Re-record whole meridian ----------
@@ -641,6 +841,7 @@ async function init() {
   }
   await refreshHome(); // 每次啟動都先與資料夾裡實際的錄音檔同步
   setMode('sequential');
+  setListenSub('meridian');
   showScreen('home');
 
   if ('serviceWorker' in navigator) {
