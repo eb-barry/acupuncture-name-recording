@@ -7,9 +7,11 @@ record the name of acupuncture for various of vocal characters — the audio fil
 ## 使用方式（目前僅支援桌面版 Chrome / Edge）
 
 1. 用 Chrome 或 Edge 開啟 <https://eb-barry.github.io/acupuncture-name-recording/>
-2. 選擇「逐經脈錄音」或「單穴錄音」模式
+2. 首頁有四個功能：逐經脈錄音、單穴錄音、音訊優化、經穴試聽
    - **逐經脈錄音**：選一條經脈，先錄一段「經脈名稱共 N 穴」的口播，再依國際標準碼順序（如 LU1 → LU11）逐穴錄製
    - **單穴錄音**：選定經脈與單一穴位，單獨錄製 / 重錄
+   - **音訊優化**：全部錄完後，批次降噪、裁切、輸出成品 MP3（見下方說明）
+   - **經穴試聽**：播放已經優化完成的成品（見下方說明）
 3. 第一次按「開始錄音」時，瀏覽器會請你：
    - 授權麥克風
    - 選擇一個資料夾，之後錄音會以 WAV 母帶格式存進裡面的 `raw_wav/` 子資料夾（不壓縮、不做任何處理，永久保留原始素材）
@@ -37,6 +39,14 @@ record the name of acupuncture for various of vocal characters — the audio fil
 5. **品質報告**：`certified_recording/optimization_report.csv`，列出每個檔案降噪前後的訊噪比與需要人工檢查（可能要重錄）的原因
 
 WAV 母帶不會被修改，所以可以重複執行。
+
+### 經穴試聽
+
+首頁第四個功能「經穴試聽」播放 `certified_recording/` 裡已經做過音訊優化的成品 MP3（純播放，不會寫入或修改任何檔案）：
+
+- **逐經脈試聽**：選一條經脈，依 WHO 標準代碼順序（LU1 → LU11 這種）自動連續播放，含經脈總穴數口播，播完一個自動接下一個
+- **單穴試聽**：選經脈與單一穴位，只播放那一個
+- 播放畫面有上一個／播放暫停／下一個三個控制鍵；如果某個穴位還沒做過音訊優化（沒有成品 MP3），播放時會自動跳過，並在畫面上提示還有幾個沒處理
 
 ### 檔名規範
 
