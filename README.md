@@ -48,6 +48,15 @@ WAV 母帶不會被修改，所以可以重複執行。
 - **單穴試聽**：選經脈與單一穴位，只播放那一個
 - 播放畫面有上一個／播放暫停／下一個三個控制鍵；如果某個穴位還沒做過音訊優化（沒有成品 MP3），播放時會自動跳過，並在畫面上提示還有幾個沒處理
 
+### 穴位名稱注音
+
+錄音畫面的大字穴位名稱、經脈總穴數口播文字，會用內嵌的注音字型（`vendor/zhuyin-subset.woff2`）顯示讀音，方便不確定怎麼唸的人對照。
+
+- 字型來源：ToneOZ-Zhuyin-Tsuipita-TC（SIL OFL 1.1 授權，見 `licenses/`），只子集化保留本專案 362 個穴位 + 14 條經脈名稱會用到的 337 個字，原始 32MB 子集後約 300KB
+- 多音字的讀音是人工核對過的：先產生「穴位注音核對表.pdf」（字型預設讀音）與「多音字讀音對照表.xlsx」（189 個多音字的所有讀音變體圖片），核對後只有 9 個字需要從預設讀音改成第二個讀音（少、率、瘈、突、膀、膻、都、處、髃），對照結果存在 `js/zhuyin.js` 的 `OVERRIDES`
+- 「譩」字（BL45 譩譆）原始字型裡就沒有這個字，畫面上會自動 fallback 用系統字型顯示、不帶注音（讀音同「意」ㄧˋ）
+- 只套用在穴位名稱大字上，下拉選單、狀態列等其他文字不套用
+
 ### 檔名規範
 
 ```
@@ -58,14 +67,18 @@ WAV 母帶不會被修改，所以可以重複執行。
 
 ## 技術重點
 
-- 錄音：`Web Audio API`（`ScriptProcessorNode` 連續擷取 PCM，按 Enter 只是標記切割點，不中斷錄音）
-- 靜音裁切：依振幅閾值裁掉每段錄音開頭與結尾的靜音
+- 錄音：`Web Audio API`，用 `AudioWorkletNode`（獨立音訊執行緒，取代已淘汰且容易在主執行緒忙碌時漏格的 `ScriptProcessorNode`）連續擷取 PCM，按 Enter 只是標記切割點，不中斷錄音；48kHz 立體聲存成 WAV 母帶（`raw_wav/`），錄音當下不裁切、不處理
+- 音訊優化：RNNoise（WebAssembly，Web Worker 裡執行）降噪 → 在降噪後訊號上找語音起訖點、裁切 → 前後補 0.5 秒真數位靜音 → 依語音峰值正規化 → 只做一次 MP3 編碼，輸出到 `certified_recording/`
 - MP3 編碼：[lamejs](https://github.com/zhuker/lamejs)（已 vendor 進 `vendor/lame.min.js`，離線也能用）
-- 存檔：File System Access API，一次選定資料夾即可連續寫檔，不會每個穴位都跳一次下載視窗
+- 存檔／讀檔：File System Access API，一次選定資料夾即可連續寫檔／播放，不用每個穴位都跳一次對話框
+- 錄音進度：以資料夾裡實際存在的 WAV 母帶為準，啟動與回首頁時自動掃描同步（見上方說明）
 - 穴位資料：`data/points-data.json`，跟「針灸助理」App 共用同一份原始資料
+- 穴位名稱注音：字型子集 + IVS 讀音變體選擇符（見上方說明）
 - 可安裝為 PWA，離線可用（`manifest.json` + `sw.js`）
 
 ## 已知限制
 
-- File System Access API 目前只有 Chromium 系瀏覽器（Chrome / Edge）支援，Safari / Firefox 無法使用存檔功能
+- File System Access API 目前只有 Chromium 系瀏覽器（Chrome / Edge）支援，Safari / Firefox 無法使用存檔／試聽功能
 - 瀏覽器基於安全機制，重新整理頁面後資料夾的寫入權限不會自動延續，需要使用者手動點一下重新確認
+- 舊版（改存 WAV 之前）直接存成 MP3 的錄音檔沒有 WAV 母帶，無法用「音訊優化」處理，需要重錄
+- 「譩」字字型裡沒有，畫面會以系統字型顯示、不帶注音

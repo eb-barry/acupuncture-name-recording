@@ -19,6 +19,15 @@
 
 * { box-sizing: border-box; }
 
+/* 穴位注音字型（ToneOZ-Zhuyin-Tsuipita-TC 的子集版，授權說明見 licenses/zhuyin-font-NOTICE.md）。
+   只套用在大字穴位名稱／口播文字上（.point-name），字型裡沒有的字（目前只有「譩」）
+   瀏覽器會自動 fallback 到後面列的系統中文字型，不會整頁報錯或空白。 */
+@font-face {
+  font-family: 'ZhuyinAcupoint';
+  src: url('../vendor/zhuyin-subset.woff2') format('woff2');
+  font-display: swap;
+}
+
 /* 保險起見：任何元素只要有 hidden 屬性就一定要隱藏，不管其他規則有沒有另外設定 display。
    .modal / .banner 都會設定自己的 display: flex，若沒有這一條，會蓋掉瀏覽器對 [hidden] 的預設隱藏行為，
    導致該元素在還沒被 JS 顯示之前就一直顯示在畫面上。 */
@@ -247,6 +256,7 @@ select {
 }
 
 .point-name {
+  font-family: 'ZhuyinAcupoint', 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
   font-size: 42px;
   font-weight: 700;
   letter-spacing: 2px;
