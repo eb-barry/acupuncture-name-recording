@@ -7,6 +7,7 @@ import { scanRecordedFiles } from './sync.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
 import { runOptimization, CERTIFIED_DIR } from './optimizer.js';
 import { buildMeridianPlaylist, buildSinglePlaylist, getCertifiedDir, loadAudioUrl } from './listen.js';
+import { withZhuyin } from './zhuyin.js';
 
 const RAW_WAV_DIR = 'raw_wav';
 
@@ -494,7 +495,7 @@ async function loadListenIndex(index, { autoplay = false } = {}) {
   }
 
   listenState.index = index;
-  el.listenPointName.textContent = item.label;
+  el.listenPointName.textContent = withZhuyin(item.label);
   el.listenPointProgress.textContent = listenPointLabel(item, playlist);
 
   if (listenState.currentUrl) URL.revokeObjectURL(listenState.currentUrl);
@@ -669,7 +670,7 @@ function findNextUndoneIndex(fromIndex) {
 function renderIntro() {
   const points = state.points;
   el.recMeridianBadge.textContent = state.meridianName;
-  el.recPointName.textContent = buildIntroText(state.meridianName, points);
+  el.recPointName.textContent = withZhuyin(buildIntroText(state.meridianName, points));
   el.recPointName.classList.add('point-name--intro');
   el.recPointProgress.textContent = '經脈總穴數口播（逐經脈錄音前，先錄這一句）';
   el.saveNextLabel.textContent = '儲存並開始逐經脈錄音';
@@ -679,7 +680,7 @@ function renderIntro() {
 function renderCurrentPoint() {
   const point = state.points[state.index];
   el.recMeridianBadge.textContent = state.meridianName;
-  el.recPointName.textContent = point.name;
+  el.recPointName.textContent = withZhuyin(point.name);
   el.recPointName.classList.remove('point-name--intro');
   el.recPointProgress.textContent = `${state.index + 1} / ${state.points.length}`;
   el.saveNextLabel.textContent = state.mode === 'sequential' ? '儲存並下一穴' : '儲存錄音';
