@@ -33,7 +33,7 @@ record the name of acupuncture for various of vocal characters — the audio fil
 首頁第三個功能「音訊優化」會批次處理 `raw_wav/` 裡所有的 WAV 母帶：
 
 1. **降噪**：RNNoise（與 Jitsi Meet 相同的開源語音降噪模型，WebAssembly，在 Web Worker 裡執行）
-2. **裁切**：在「降噪後」的訊號上找出真正的語音起訖點，剪掉前後空白，前後各補上 0.5 秒**真正的數位靜音**（振幅為 0）
+2. **裁切**：在「降噪後」的訊號上找出真正的語音起訖點，剪掉前後空白，前後各補上 0.1 秒**真正的數位靜音**（振幅為 0），以減少連續播報穴位時中間的停頓
 3. **音量**：只依語音區段的峰值正規化到 90%（不會把雜訊一起放大）
 4. **輸出**：只做一次 MP3 編碼（48kHz 立體聲 128kbps），存到 `certified_recording/`，檔名同錄音、副檔名 `.mp3`
 5. **品質報告**：`certified_recording/optimization_report.csv`，列出每個檔案降噪前後的訊噪比與需要人工檢查（可能要重錄）的原因
@@ -68,7 +68,7 @@ WAV 母帶不會被修改，所以可以重複執行。
 ## 技術重點
 
 - 錄音：`Web Audio API`，用 `AudioWorkletNode`（獨立音訊執行緒，取代已淘汰且容易在主執行緒忙碌時漏格的 `ScriptProcessorNode`）連續擷取 PCM，按 Enter 只是標記切割點，不中斷錄音；48kHz 立體聲存成 WAV 母帶（`raw_wav/`），錄音當下不裁切、不處理
-- 音訊優化：RNNoise（WebAssembly，Web Worker 裡執行）降噪 → 在降噪後訊號上找語音起訖點、裁切 → 前後補 0.5 秒真數位靜音 → 依語音峰值正規化 → 只做一次 MP3 編碼，輸出到 `certified_recording/`
+- 音訊優化：RNNoise（WebAssembly，Web Worker 裡執行）降噪 → 在降噪後訊號上找語音起訖點、裁切 → 前後補 0.1 秒真數位靜音 → 依語音峰值正規化 → 只做一次 MP3 編碼，輸出到 `certified_recording/`
 - MP3 編碼：[lamejs](https://github.com/zhuker/lamejs)（已 vendor 進 `vendor/lame.min.js`，離線也能用）
 - 存檔／讀檔：File System Access API，一次選定資料夾即可連續寫檔／播放，不用每個穴位都跳一次對話框
 - 錄音進度：以資料夾裡實際存在的 WAV 母帶為準，啟動與回首頁時自動掃描同步（見上方說明）

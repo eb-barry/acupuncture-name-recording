@@ -12,7 +12,7 @@
 
 export const SAMPLE_RATE = 48000; // RNNoise 原生取樣率，錄音也統一用 48kHz
 export const RNNOISE_FRAME = 480; // RNNoise 固定每次處理 480 個樣本（10 毫秒 @48kHz）
-export const SILENCE_PAD_SECONDS = 0.5; // 語音前後各補的真靜音長度
+export const SILENCE_PAD_SECONDS = 0.1; // 語音前後各補的真靜音長度
 export const TARGET_PEAK = 0.9;
 
 const GUARD_SECONDS = 0.06; // 語音起訖點外多保留的緩衝，避免吃掉氣音/尾音
