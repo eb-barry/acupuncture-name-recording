@@ -7,6 +7,7 @@ const DB_NAME = 'acupuncture-recorder';
 const DB_VERSION = 1;
 const STORE_NAME = 'handles';
 const HANDLE_KEY = 'output-directory';
+const LISTEN_HANDLE_KEY = 'listen-directory';
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -34,6 +35,26 @@ export async function loadDirectoryHandle() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const req = tx.objectStore(STORE_NAME).get(HANDLE_KEY);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function saveListenDirectoryHandle(handle) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(handle, LISTEN_HANDLE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadListenDirectoryHandle() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(LISTEN_HANDLE_KEY);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
