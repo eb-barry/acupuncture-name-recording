@@ -1,6 +1,7 @@
 import { getMeridianNames, getPointsForMeridian, buildWavFileName, buildIntroWavFileName, buildIntroText, INTRO_CODE } from './points-data.js';
 import {
-  saveDirectoryHandle, loadDirectoryHandle, verifyPermission, getSubDirectory,
+  saveDirectoryHandle, loadDirectoryHandle, saveListenDirectoryHandle, loadListenDirectoryHandle,
+  verifyPermission, getSubDirectory,
   getMeridianProgress, getResetAt, markPointDone, resetMeridianProgress, replaceAllProgress, isPointDone,
 } from './storage.js';
 import { scanRecordedFiles } from './sync.js';
@@ -102,6 +103,8 @@ const state = {
   points: [],
   index: 0,
   directoryHandle: null,
+  listenDirectoryHandle: null,
+  listenDirectoryReady: false,
   saving: false,
   listenSub: 'meridian', // 'meridian' | 'single'
 };
@@ -150,8 +153,9 @@ async function ensureDirectoryHandle({ mode = 'readwrite', purpose = 'recording'
 function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew = false } = {}) {
   return new Promise((resolve) => {
     const isListen = purpose === 'listen';
+    const currentHandle = isListen ? state.listenDirectoryHandle : state.directoryHandle;
     el.folderPromptTitle.textContent = isListen ? '需要選擇試聽資料夾' : '需要選擇儲存資料夾';
-    el.folderPromptText.textContent = state.directoryHandle && !forceNew
+    el.folderPromptText.textContent = currentHandle && !forceNew
       ? `瀏覽器需要你重新確認資料夾的${isListen ? '讀取' : '存取'}權限，才能繼續。`
       : isListen
         ? `請選擇包含 MP3 的資料夾，或包含 ${CERTIFIED_DIR} 子資料夾的錄音專案資料夾。`
@@ -162,7 +166,7 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
       el.folderPromptBtn.removeEventListener('click', onClick);
       el.folderPrompt.hidden = true;
       try {
-        let handle = forceNew ? null : state.directoryHandle;
+        let handle = forceNew ? null : currentHandle;
         if (handle) {
           const granted = await verifyPermission(handle, true, mode);
           if (!granted) handle = null;
@@ -170,9 +174,15 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
         if (!handle) {
           handle = await window.showDirectoryPicker({ mode });
         }
-        state.directoryHandle = handle;
-        await saveDirectoryHandle(handle);
-        resolve(true);
+        if (isListen) {
+          state.listenDirectoryHandle = handle;
+          state.listenDirectoryReady = true;
+          await saveListenDirectoryHandle(handle);
+        } else {
+          state.directoryHandle = handle;
+          await saveDirectoryHandle(handle);
+        }
+        resolve(handle);
       } catch (e) {
         if (!e || e.name !== 'AbortError') console.error(e);
         showError(`沒有選擇資料夾，或權限被拒絕，無法${isListen ? '開始試聽' : '繼續操作'}。`);
@@ -181,6 +191,40 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
     };
     el.folderPromptBtn.addEventListener('click', onClick);
   });
+}
+
+async function ensureListenDirectoryHandle() {
+  // 本次頁面已由使用者選過時直接沿用；實際掃描若失去權限會拋錯並顯示明確訊息。
+  // 不在每次按「開始試聽」前再次 queryPermission，避免部分瀏覽器把只讀控制代碼誤判成需重選。
+  if (state.listenDirectoryHandle && state.listenDirectoryReady) return state.listenDirectoryHandle;
+
+  if (state.listenDirectoryHandle) {
+    if (await verifyPermission(state.listenDirectoryHandle, false, 'read')) {
+      state.listenDirectoryReady = true;
+      return state.listenDirectoryHandle;
+    }
+    return promptForFolder({ mode: 'read', purpose: 'listen' });
+  }
+
+  const saved = await loadListenDirectoryHandle().catch(() => null);
+  if (saved) {
+    state.listenDirectoryHandle = saved;
+    if (await verifyPermission(saved, false, 'read')) {
+      state.listenDirectoryReady = true;
+      return saved;
+    }
+    return promptForFolder({ mode: 'read', purpose: 'listen' });
+  }
+
+  // 向下相容：若先前只儲存過錄音專案根目錄，也可直接從該目錄尋找成品。
+  if (state.directoryHandle && await verifyPermission(state.directoryHandle, false, 'read')) {
+    state.listenDirectoryHandle = state.directoryHandle;
+    state.listenDirectoryReady = true;
+    await saveListenDirectoryHandle(state.directoryHandle);
+    return state.directoryHandle;
+  }
+
+  return promptForFolder({ mode: 'read', purpose: 'listen' });
 }
 
 el.settingsBtn.addEventListener('click', async () => {
@@ -346,11 +390,11 @@ el.listenSubMeridian.addEventListener('click', () => setListenSub('meridian'));
 el.listenSubSingle.addEventListener('click', () => setListenSub('single'));
 
 async function prepareListenDirectory({ showEmptyError = false } = {}) {
-  const folderOk = await ensureDirectoryHandle({ mode: 'read', purpose: 'listen' });
-  if (!folderOk) return null;
+  const rootHandle = await ensureListenDirectoryHandle();
+  if (!rootHandle) return null;
 
   try {
-    const result = await findListenDirectory(state.directoryHandle);
+    const result = await findListenDirectory(rootHandle);
     if (!result) {
       listenState.certifiedDir = null;
       el.listenFolderStatus.hidden = false;
@@ -363,14 +407,18 @@ async function prepareListenDirectory({ showEmptyError = false } = {}) {
 
     listenState.certifiedDir = result.dirHandle;
     el.listenFolderStatus.hidden = false;
-    el.listenFolderStatus.textContent = `已掃描資料夾，找到 ${result.mp3Count} 個 MP3 檔。`;
+    el.listenFolderStatus.textContent = `已掃描「${result.dirHandle.name}」，找到 ${result.mp3Count} 個 MP3 檔。`;
     return result.dirHandle;
   } catch (e) {
     console.error(e);
     listenState.certifiedDir = null;
     el.listenFolderStatus.hidden = false;
-    el.listenFolderStatus.textContent = '掃描 MP3 檔時發生錯誤。';
-    showError('無法掃描所選資料夾，請重新選擇資料夾後再試一次。');
+    const permissionLost = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    if (permissionLost) state.listenDirectoryReady = false;
+    el.listenFolderStatus.textContent = permissionLost ? '試聽資料夾的讀取權限已失效。' : '掃描 MP3 檔時發生錯誤。';
+    showError(permissionLost
+      ? '瀏覽器已失去試聽資料夾的讀取權限，請按「選擇 MP3 資料夾」重新授權。'
+      : '無法掃描所選資料夾，請重新選擇資料夾後再試一次。');
     return null;
   }
 }
@@ -878,6 +926,8 @@ async function init() {
   try {
     const saved = await loadDirectoryHandle();
     if (saved) state.directoryHandle = saved;
+    const savedListen = await loadListenDirectoryHandle();
+    if (savedListen) state.listenDirectoryHandle = savedListen;
   } catch (e) {
     console.error(e);
   }
