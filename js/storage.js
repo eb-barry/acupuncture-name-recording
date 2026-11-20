@@ -49,9 +49,10 @@ export async function clearDirectoryHandle() {
   });
 }
 
-// 確認資料夾權限是否還有效；沒有的話嘗試重新要求（必須由使用者點擊觸發才會跳出瀏覽器提示）
-export async function verifyPermission(handle, requestIfNeeded = true) {
-  const opts = { mode: 'readwrite' };
+// 確認資料夾權限是否還有效；沒有的話嘗試重新要求（必須由使用者點擊觸發才會跳出瀏覽器提示）。
+// 試聽只需要 read，錄音與音訊優化才需要 readwrite。
+export async function verifyPermission(handle, requestIfNeeded = true, mode = 'readwrite') {
+  const opts = { mode };
   if ((await handle.queryPermission(opts)) === 'granted') return true;
   if (!requestIfNeeded) return false;
   if ((await handle.requestPermission(opts)) === 'granted') return true;

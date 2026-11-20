@@ -6,7 +6,7 @@ import {
 import { scanRecordedFiles } from './sync.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
 import { runOptimization, CERTIFIED_DIR } from './optimizer.js';
-import { buildMeridianPlaylist, buildSinglePlaylist, getCertifiedDir, loadAudioUrl } from './listen.js';
+import { buildMeridianPlaylist, buildSinglePlaylist, findListenDirectory, loadAudioUrl } from './listen.js';
 import { withZhuyin } from './zhuyin.js';
 
 const RAW_WAV_DIR = 'raw_wav';
@@ -59,6 +59,8 @@ const el = {
   meridianSelectListenSingle: $('meridianSelectListenSingle'),
   pointSelectListen: $('pointSelectListen'),
   startListenBtn: $('startListenBtn'),
+  listenChooseFolderBtn: $('listenChooseFolderBtn'),
+  listenFolderStatus: $('listenFolderStatus'),
 
   listenModeBadge: $('listenModeBadge'),
   listenMeridianBadge: $('listenMeridianBadge'),
@@ -87,6 +89,7 @@ const el = {
   nextMeridianBtn: $('nextMeridianBtn'),
 
   folderPrompt: $('folderPrompt'),
+  folderPromptTitle: $('folderPromptTitle'),
   folderPromptText: $('folderPromptText'),
   folderPromptBtn: $('folderPromptBtn'),
 };
@@ -128,47 +131,51 @@ function showScreen(name) {
 }
 
 // ---------- Folder handling ----------
-async function ensureDirectoryHandle() {
+async function ensureDirectoryHandle({ mode = 'readwrite', purpose = 'recording' } = {}) {
   if (state.directoryHandle) {
-    const ok = await verifyPermission(state.directoryHandle, false);
+    const ok = await verifyPermission(state.directoryHandle, false, mode);
     if (ok) return true;
   }
   if (!state.directoryHandle) {
     const saved = await loadDirectoryHandle().catch(() => null);
     if (saved) {
       state.directoryHandle = saved;
-      const ok = await verifyPermission(saved, false);
+      const ok = await verifyPermission(saved, false, mode);
       if (ok) return true;
     }
   }
-  return promptForFolder();
+  return promptForFolder({ mode, purpose });
 }
 
-function promptForFolder() {
+function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew = false } = {}) {
   return new Promise((resolve) => {
-    el.folderPromptText.textContent = state.directoryHandle
-      ? '瀏覽器需要你重新確認資料夾的存取權限，才能繼續存檔。'
-      : '請選擇一個資料夾，錄好的 MP3 檔案會直接存進去。';
+    const isListen = purpose === 'listen';
+    el.folderPromptTitle.textContent = isListen ? '需要選擇試聽資料夾' : '需要選擇儲存資料夾';
+    el.folderPromptText.textContent = state.directoryHandle && !forceNew
+      ? `瀏覽器需要你重新確認資料夾的${isListen ? '讀取' : '存取'}權限，才能繼續。`
+      : isListen
+        ? `請選擇包含 MP3 的資料夾，或包含 ${CERTIFIED_DIR} 子資料夾的錄音專案資料夾。`
+        : '請選擇錄音專案資料夾，WAV 母帶與優化後的 MP3 會存進對應的子資料夾。';
     el.folderPrompt.hidden = false;
 
     const onClick = async () => {
       el.folderPromptBtn.removeEventListener('click', onClick);
       el.folderPrompt.hidden = true;
       try {
-        let handle = state.directoryHandle;
+        let handle = forceNew ? null : state.directoryHandle;
         if (handle) {
-          const granted = await verifyPermission(handle, true);
+          const granted = await verifyPermission(handle, true, mode);
           if (!granted) handle = null;
         }
         if (!handle) {
-          handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          handle = await window.showDirectoryPicker({ mode });
         }
         state.directoryHandle = handle;
         await saveDirectoryHandle(handle);
         resolve(true);
       } catch (e) {
-        console.error(e);
-        showError('沒有選擇資料夾，或權限被拒絕，無法開始錄音。');
+        if (!e || e.name !== 'AbortError') console.error(e);
+        showError(`沒有選擇資料夾，或權限被拒絕，無法${isListen ? '開始試聽' : '繼續操作'}。`);
         resolve(false);
       }
     };
@@ -177,7 +184,7 @@ function promptForFolder() {
 }
 
 el.settingsBtn.addEventListener('click', async () => {
-  await promptForFolder();
+  await promptForFolder({ mode: 'readwrite', purpose: 'recording', forceNew: true });
 });
 
 // ---------- 與資料夾同步錄音進度 ----------
@@ -338,6 +345,36 @@ function setListenSub(sub) {
 el.listenSubMeridian.addEventListener('click', () => setListenSub('meridian'));
 el.listenSubSingle.addEventListener('click', () => setListenSub('single'));
 
+async function prepareListenDirectory({ showEmptyError = false } = {}) {
+  const folderOk = await ensureDirectoryHandle({ mode: 'read', purpose: 'listen' });
+  if (!folderOk) return null;
+
+  try {
+    const result = await findListenDirectory(state.directoryHandle);
+    if (!result) {
+      listenState.certifiedDir = null;
+      el.listenFolderStatus.hidden = false;
+      el.listenFolderStatus.textContent = '所選資料夾中沒有找到 MP3 檔。';
+      if (showEmptyError) {
+        showError(`所選資料夾與其 ${CERTIFIED_DIR} 子資料夾中都沒有 MP3 檔，請改選已有錄音成品的資料夾。`);
+      }
+      return null;
+    }
+
+    listenState.certifiedDir = result.dirHandle;
+    el.listenFolderStatus.hidden = false;
+    el.listenFolderStatus.textContent = `已掃描資料夾，找到 ${result.mp3Count} 個 MP3 檔。`;
+    return result.dirHandle;
+  } catch (e) {
+    console.error(e);
+    listenState.certifiedDir = null;
+    el.listenFolderStatus.hidden = false;
+    el.listenFolderStatus.textContent = '掃描 MP3 檔時發生錯誤。';
+    showError('無法掃描所選資料夾，請重新選擇資料夾後再試一次。');
+    return null;
+  }
+}
+
 // ---------- Mode cards ----------
 function setMode(mode) {
   state.mode = mode;
@@ -353,7 +390,14 @@ function setMode(mode) {
 el.modeCardSequential.addEventListener('click', () => setMode('sequential'));
 el.modeCardSingle.addEventListener('click', () => setMode('single'));
 el.modeCardOptimize.addEventListener('click', () => setMode('optimize'));
-el.modeCardListen.addEventListener('click', () => setMode('listen'));
+el.modeCardListen.addEventListener('click', async () => {
+  setMode('listen');
+  await prepareListenDirectory({ showEmptyError: true });
+});
+el.listenChooseFolderBtn.addEventListener('click', async () => {
+  const selected = await promptForFolder({ mode: 'read', purpose: 'listen', forceNew: true });
+  if (selected) await prepareListenDirectory({ showEmptyError: true });
+});
 
 // ---------- 音訊優化（批次）----------
 let optimizeCancelRequested = false;
@@ -419,14 +463,11 @@ el.cancelOptimizeBtn.addEventListener('click', () => {
 });
 
 // ---------- 經穴試聽 ----------
-// 只播放 certified_recording 裡「音訊優化」處理完的成品；跟錄音、優化都不同，這裡完全不寫檔。
+// 掃描所選資料夾（或其 certified_recording 子資料夾）並依既有檔名規則播放 MP3；
+// 跟錄音、優化都不同，這裡完全不寫檔。
 el.startListenBtn.addEventListener('click', async () => {
-  const folderOk = await ensureDirectoryHandle();
-  if (!folderOk) return;
-
-  const certifiedDir = await getCertifiedDir(state.directoryHandle);
+  const certifiedDir = await prepareListenDirectory({ showEmptyError: true });
   if (!certifiedDir) {
-    showError(`還沒有任何已完成優化的成品。請先錄音，再用「音訊優化」處理過後才能試聽（成品會在 ${CERTIFIED_DIR} 資料夾）。`);
     return;
   }
 
@@ -451,7 +492,7 @@ el.startListenBtn.addEventListener('click', async () => {
   }
 
   if (!playlist.some((item) => item.exists)) {
-    showError('這個範圍裡的穴位都還沒有優化過的成品，請先執行「音訊優化」。');
+    showError('資料夾裡雖然有 MP3，但沒有符合這個範圍與既有檔名規則的穴位錄音。');
     return;
   }
 

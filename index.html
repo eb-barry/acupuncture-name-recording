@@ -125,6 +125,8 @@
         <select id="pointSelectListen"></select>
       </div>
 
+      <div id="listenFolderStatus" class="progress-hint" hidden></div>
+      <button id="listenChooseFolderBtn" class="btn btn--ghost btn--block">選擇 MP3 資料夾</button>
       <button id="startListenBtn" class="btn btn--primary btn--block">開始試聽</button>
     </div>
   </section>
@@ -196,7 +198,7 @@
 <!-- 資料夾尚未授權時的提示卡 -->
 <div id="folderPrompt" class="modal" hidden>
   <div class="modal__card">
-    <h2>需要選擇儲存資料夾</h2>
+    <h2 id="folderPromptTitle">需要選擇儲存資料夾</h2>
     <p id="folderPromptText">請選擇一個資料夾，錄好的 WAV 母帶會存進裡面的 raw_wav 子資料夾。</p>
     <button id="folderPromptBtn" class="btn btn--primary btn--block">選擇資料夾</button>
   </div>
