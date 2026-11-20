@@ -1,5 +1,5 @@
 // listen.js
-// 「經穴試聽」：從 certified_recording/ 讀取已經做過音訊優化的成品 MP3 來播放。
+// 「經穴試聽」：讀取使用者所選資料夾，或其 certified_recording/ 子資料夾中的 MP3。
 // 跟錄音、優化都不一樣的地方：這裡完全不寫檔，只讀取，所以不需要處理任何覆蓋/備份的問題。
 
 import { buildFileName, buildIntroFileName, INTRO_CODE } from './points-data.js';
@@ -55,6 +55,28 @@ export async function getCertifiedDir(rootHandle) {
   } catch {
     return null;
   }
+}
+
+async function countMp3Files(dirHandle) {
+  let count = 0;
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'file' && name.toLowerCase().endsWith('.mp3')) count++;
+  }
+  return count;
+}
+
+// 使用者可以選錄音專案的根資料夾，也可以直接選 certified_recording。
+// 優先採用 certified_recording，避免根目錄中的舊版 MP3 蓋過優化後的成品。
+export async function findListenDirectory(rootHandle) {
+  const certifiedDir = await getCertifiedDir(rootHandle);
+  if (certifiedDir) {
+    const mp3Count = await countMp3Files(certifiedDir);
+    if (mp3Count > 0) return { dirHandle: certifiedDir, mp3Count };
+  }
+
+  const mp3Count = await countMp3Files(rootHandle);
+  if (mp3Count > 0) return { dirHandle: rootHandle, mp3Count };
+  return null;
 }
 
 export async function loadAudioUrl(dirHandle, fileName) {
