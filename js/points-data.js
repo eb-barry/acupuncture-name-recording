@@ -88,10 +88,28 @@ export function buildWavFileName(meridianName, point) {
   return `${point.code}-${meridianName}-${point.name}.wav`;
 }
 
-// 每條經脈在正式逐經脈錄音前，會先錄一段「經脈總穴數」的口播（例如「手太陰肺經共11穴」）。
+// 每條經脈在正式逐經脈錄音前，會先錄一段「穴位總數音檔」（例如「手太陰肺經共十一穴」）。
 // 這個口播用 localStorage 進度追蹤時，用這個內部代碼當成一個特殊「穴位」來標記完成與否，
 // 不會跟真正的穴位代碼衝突（真正的穴位代碼不會有底線）。
 export const INTRO_CODE = '__INTRO__';
+
+// 「經外」目前只有單一奇穴，總數口播沒有對應的固定檔名需求，單穴選單先不提供。
+export function meridianHasCountIntro(meridianName) {
+  return meridianName !== '經外';
+}
+
+const CHINESE_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+
+// 0–99 的錄音口播數字。10–19 是「十、十一」，20、30 等整十不補「零」。
+export function toChineseNumber(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n >= 100) return String(value);
+  if (n < 10) return CHINESE_DIGITS[n];
+  const tens = Math.floor(n / 10);
+  const ones = n % 10;
+  const tensText = `${tens === 1 ? '' : CHINESE_DIGITS[tens]}十`;
+  return ones === 0 ? tensText : `${tensText}${CHINESE_DIGITS[ones]}`;
+}
 
 // 口播存檔命名：[國際代碼前綴]-[總穴數].mp3，例如手太陰肺經（LU1~LU11）存成 LU-11.mp3
 export function buildIntroFileName(meridianName, points) {
@@ -107,5 +125,5 @@ export function buildIntroWavFileName(meridianName, points) {
 }
 
 export function buildIntroText(meridianName, points) {
-  return `${meridianName}共${points.length}穴`;
+  return `${meridianName}共${toChineseNumber(points.length)}穴`;
 }

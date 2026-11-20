@@ -2,7 +2,7 @@
 // 「經穴試聽」：讀取使用者所選資料夾，或其 certified_recording/ 子資料夾中的 MP3。
 // 跟錄音、優化都不一樣的地方：這裡完全不寫檔，只讀取，所以不需要處理任何覆蓋/備份的問題。
 
-import { buildFileName, buildIntroFileName, INTRO_CODE } from './points-data.js';
+import { buildFileName, buildIntroFileName, buildIntroText, INTRO_CODE } from './points-data.js';
 import { CERTIFIED_DIR } from './optimizer.js';
 
 // 建立一條經脈的播放清單：口播（如果有）+ 依 WHO 國際代碼順序排列的每個穴位。
@@ -13,7 +13,7 @@ export async function buildMeridianPlaylist(certifiedDir, meridianName, points) 
   const introName = buildIntroFileName(meridianName, points);
   list.push({
     code: INTRO_CODE,
-    label: `${meridianName}總穴數口播`,
+    label: buildIntroText(meridianName, points),
     fileName: introName,
     exists: await fileExists(certifiedDir, introName),
   });
@@ -35,6 +35,16 @@ export async function buildSinglePlaylist(certifiedDir, meridianName, point) {
   return [{
     code: point.code,
     label: point.name,
+    fileName,
+    exists: await fileExists(certifiedDir, fileName),
+  }];
+}
+
+export async function buildIntroPlaylist(certifiedDir, meridianName, points) {
+  const fileName = buildIntroFileName(meridianName, points);
+  return [{
+    code: INTRO_CODE,
+    label: buildIntroText(meridianName, points),
     fileName,
     exists: await fileExists(certifiedDir, fileName),
   }];

@@ -1,4 +1,4 @@
-import { getMeridianNames, getPointsForMeridian, buildWavFileName, buildIntroWavFileName, buildIntroText, INTRO_CODE } from './points-data.js';
+import { getMeridianNames, getPointsForMeridian, buildWavFileName, buildIntroWavFileName, buildIntroText, meridianHasCountIntro, INTRO_CODE } from './points-data.js';
 import {
   saveDirectoryHandle, loadDirectoryHandle, saveListenDirectoryHandle, loadListenDirectoryHandle,
   verifyPermission, getSubDirectory,
@@ -7,7 +7,7 @@ import {
 import { scanRecordedFiles } from './sync.js';
 import { ContinuousRecorder, encodeWav, hasSpeech } from './audio-recorder.js';
 import { runOptimization, CERTIFIED_DIR } from './optimizer.js';
-import { buildMeridianPlaylist, buildSinglePlaylist, findListenDirectory, loadAudioUrl } from './listen.js';
+import { buildMeridianPlaylist, buildSinglePlaylist, buildIntroPlaylist, findListenDirectory, loadAudioUrl } from './listen.js';
 import { withZhuyin } from './zhuyin.js';
 
 const RAW_WAV_DIR = 'raw_wav';
@@ -375,11 +375,28 @@ async function refreshSequentialHint() {
   el.reRecordMeridianBtn.hidden = doneCount === 0 && !introDone;
 }
 
+function restoreSelection(select, previousValue, fallbackValue) {
+  const values = [...select.options].map((option) => option.value);
+  if (previousValue && values.includes(previousValue)) select.value = previousValue;
+  else if (fallbackValue && values.includes(fallbackValue)) select.value = fallbackValue;
+}
+
+function appendCountIntroOption(select, meridianName, { showDone = false } = {}) {
+  if (!meridianHasCountIntro(meridianName)) return;
+  const opt = document.createElement('option');
+  opt.value = INTRO_CODE;
+  const done = showDone && isPointDone(meridianName, INTRO_CODE);
+  opt.textContent = `穴位總數音檔${done ? '　✓ 已錄' : ''}`;
+  select.appendChild(opt);
+}
+
 async function populateSinglePointSelect() {
   const meridianName = el.meridianSelectSingle.value;
   if (!meridianName) return;
+  const previousValue = el.pointSelectSingle.value;
   const points = await getPointsForMeridian(meridianName);
   el.pointSelectSingle.innerHTML = '';
+  appendCountIntroOption(el.pointSelectSingle, meridianName, { showDone: true });
   for (const p of points) {
     const opt = document.createElement('option');
     opt.value = p.code;
@@ -387,19 +404,24 @@ async function populateSinglePointSelect() {
     opt.textContent = `${p.code}　${p.name}${done ? '　✓ 已錄' : ''}`;
     el.pointSelectSingle.appendChild(opt);
   }
+  // 總數音檔放第一個，但切換經脈時仍預設第一個穴位，避免忘記改選就覆蓋口播。
+  restoreSelection(el.pointSelectSingle, previousValue, points[0] && points[0].code);
 }
 
 async function populateListenPointSelect() {
   const meridianName = el.meridianSelectListenSingle.value;
   if (!meridianName) return;
+  const previousValue = el.pointSelectListen.value;
   const points = await getPointsForMeridian(meridianName);
   el.pointSelectListen.innerHTML = '';
+  appendCountIntroOption(el.pointSelectListen, meridianName);
   for (const p of points) {
     const opt = document.createElement('option');
     opt.value = p.code;
     opt.textContent = `${p.code}　${p.name}`;
     el.pointSelectListen.appendChild(opt);
   }
+  restoreSelection(el.pointSelectListen, previousValue, points[0] && points[0].code);
 }
 
 el.meridianSelect.addEventListener('change', refreshSequentialHint);
@@ -574,9 +596,14 @@ el.startListenBtn.addEventListener('click', async () => {
     const code = el.pointSelectListen.value;
     if (!meridianName || !code) return;
     const points = await getPointsForMeridian(meridianName);
-    const point = points.find((p) => p.code === code);
-    if (!point) return;
-    playlist = await buildSinglePlaylist(certifiedDir, meridianName, point);
+    if (code === INTRO_CODE) {
+      if (!meridianHasCountIntro(meridianName)) return;
+      playlist = await buildIntroPlaylist(certifiedDir, meridianName, points);
+    } else {
+      const point = points.find((p) => p.code === code);
+      if (!point) return;
+      playlist = await buildSinglePlaylist(certifiedDir, meridianName, point);
+    }
     modeLabel = '單穴試聽';
     listenState.meridianName = meridianName;
   }
@@ -597,7 +624,7 @@ el.startListenBtn.addEventListener('click', async () => {
 });
 
 function listenPointLabel(item, playlist) {
-  if (item.code === INTRO_CODE) return '口播';
+  if (item.code === INTRO_CODE) return '穴位總數音檔';
   const pointsOnly = playlist.filter((p) => p.code !== INTRO_CODE);
   const pos = pointsOnly.findIndex((p) => p.code === item.code);
   return `${pos + 1} / ${pointsOnly.length}`;
@@ -738,8 +765,10 @@ el.startSingleBtn.addEventListener('click', async () => {
   if (!meridianName || !code) return;
 
   const points = await getPointsForMeridian(meridianName);
-  const index = points.findIndex((p) => p.code === code);
-  if (index === -1) {
+  const isIntro = code === INTRO_CODE;
+  const index = isIntro ? 0 : points.findIndex((p) => p.code === code);
+  if (isIntro && !meridianHasCountIntro(meridianName)) return;
+  if (!isIntro && index === -1) {
     showError('找不到這個穴位。');
     return;
   }
@@ -751,7 +780,7 @@ el.startSingleBtn.addEventListener('click', async () => {
   state.meridianName = meridianName;
   state.points = points;
   state.index = index;
-  state.stage = 'points';
+  state.stage = isIntro ? 'intro' : 'points';
 
   await beginRecordingSession('single');
 });
@@ -781,7 +810,7 @@ async function beginRecordingSession(mode) {
   el.saveNextLabel.textContent = mode === 'sequential' && state.stage === 'points' ? '儲存並下一穴' : '儲存錄音';
 
   showScreen('recording');
-  if (mode === 'sequential' && state.stage === 'intro') {
+  if (state.stage === 'intro') {
     renderIntro();
   } else {
     renderCurrentPoint();
@@ -803,8 +832,10 @@ function renderIntro() {
   el.recMeridianBadge.textContent = state.meridianName;
   el.recPointName.textContent = withZhuyin(buildIntroText(state.meridianName, points));
   el.recPointName.classList.add('point-name--intro');
-  el.recPointProgress.textContent = '經脈總穴數口播（逐經脈錄音前，先錄這一句）';
-  el.saveNextLabel.textContent = '儲存並開始逐經脈錄音';
+  el.recPointProgress.textContent = state.mode === 'sequential'
+    ? '穴位總數音檔（逐經脈錄音前，先錄這一句）'
+    : '穴位總數音檔';
+  el.saveNextLabel.textContent = state.mode === 'sequential' ? '儲存並開始逐經脈錄音' : '儲存錄音';
   setStatus('ready');
 }
 
@@ -820,10 +851,10 @@ function renderCurrentPoint() {
 
 function setStatus(newState) {
   el.statusLight.dataset.state = newState;
-  const isIntro = state.mode === 'sequential' && state.stage === 'intro';
+  const isIntro = state.stage === 'intro';
   if (newState === 'ready') {
     el.statusText.textContent = 'READY';
-    el.statusHint.textContent = isIntro ? '請開始錄音，唸出「經脈名稱共 N 穴」' : '請開始錄音，說出穴位名稱';
+    el.statusHint.textContent = isIntro ? '請開始錄音，照畫面唸出經脈總穴數' : '請開始錄音，說出穴位名稱';
   } else if (newState === 'recording') {
     el.statusText.textContent = 'RECORDING';
     el.statusHint.textContent = '正在錄音中...';
@@ -855,7 +886,7 @@ async function saveCurrentPointAndAdvance(mode) {
     const blob = encodeWav(left, right);
     const rawWavDir = await getSubDirectory(state.directoryHandle, RAW_WAV_DIR);
 
-    if (mode === 'sequential' && state.stage === 'intro') {
+    if (state.stage === 'intro') {
       const fileName = buildIntroWavFileName(state.meridianName, state.points);
       const fileHandle = await rawWavDir.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
@@ -863,6 +894,16 @@ async function saveCurrentPointAndAdvance(mode) {
       await writable.close();
 
       markPointDone(state.meridianName, INTRO_CODE);
+
+      if (mode === 'single') {
+        state.saving = false;
+        el.saveNextBtn.disabled = false;
+        await recorder.reset();
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+        showScreen('home');
+        await refreshHome();
+        return;
+      }
 
       state.stage = 'points';
       state.saving = false;
