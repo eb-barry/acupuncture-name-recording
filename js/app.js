@@ -105,6 +105,7 @@ const state = {
   directoryHandle: null,
   listenDirectoryHandle: null,
   listenDirectoryReady: false,
+  listenDirectoryPersistenceWarning: false,
   saving: false,
   listenSub: 'meridian', // 'meridian' | 'single'
 };
@@ -165,8 +166,9 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
     const onClick = async () => {
       el.folderPromptBtn.removeEventListener('click', onClick);
       el.folderPrompt.hidden = true;
+      let handle;
       try {
-        let handle = forceNew ? null : currentHandle;
+        handle = forceNew ? null : currentHandle;
         if (handle) {
           const granted = await verifyPermission(handle, true, mode);
           if (!granted) handle = null;
@@ -174,20 +176,41 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
         if (!handle) {
           handle = await window.showDirectoryPicker({ mode });
         }
-        if (isListen) {
-          state.listenDirectoryHandle = handle;
-          state.listenDirectoryReady = true;
-          await saveListenDirectoryHandle(handle);
-        } else {
-          state.directoryHandle = handle;
-          await saveDirectoryHandle(handle);
-        }
-        resolve(handle);
       } catch (e) {
         if (!e || e.name !== 'AbortError') console.error(e);
-        showError(`沒有選擇資料夾，或權限被拒絕，無法${isListen ? '開始試聽' : '繼續操作'}。`);
+        if (e && e.name === 'AbortError') {
+          showError('已取消選擇資料夾，尚未變更試聽資料夾。');
+        } else if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+          showError(`瀏覽器未授權讀取資料夾，無法${isListen ? '開始試聽' : '繼續操作'}。`);
+        } else {
+          showError(`選擇資料夾時發生錯誤${e && e.name ? `（${e.name}）` : ''}，請再試一次。`);
+        }
         resolve(false);
+        return;
       }
+
+      if (isListen) {
+        state.listenDirectoryHandle = handle;
+        state.listenDirectoryReady = true;
+        state.listenDirectoryPersistenceWarning = false;
+        setListenFolderStatus('正在掃描 MP3 檔…');
+        try {
+          await saveListenDirectoryHandle(handle);
+        } catch (e) {
+          // IndexedDB 在無痕模式、儲存空間受限或部分 WebView 中可能無法保存
+          // FileSystemDirectoryHandle；本次頁面仍可直接使用已取得的 handle，不應判定選擇失敗。
+          console.warn('無法記住試聽資料夾，本次仍會繼續使用', e);
+          state.listenDirectoryPersistenceWarning = true;
+        }
+      } else {
+        state.directoryHandle = handle;
+        try {
+          await saveDirectoryHandle(handle);
+        } catch (e) {
+          console.warn('無法記住儲存資料夾，本次仍會繼續使用', e);
+        }
+      }
+      resolve(handle);
     };
     el.folderPromptBtn.addEventListener('click', onClick);
   });
@@ -220,7 +243,12 @@ async function ensureListenDirectoryHandle() {
   if (state.directoryHandle && await verifyPermission(state.directoryHandle, false, 'read')) {
     state.listenDirectoryHandle = state.directoryHandle;
     state.listenDirectoryReady = true;
-    await saveListenDirectoryHandle(state.directoryHandle);
+    try {
+      await saveListenDirectoryHandle(state.directoryHandle);
+    } catch (e) {
+      console.warn('無法記住試聽資料夾，本次仍會繼續使用', e);
+      state.listenDirectoryPersistenceWarning = true;
+    }
     return state.directoryHandle;
   }
 
@@ -389,16 +417,29 @@ function setListenSub(sub) {
 el.listenSubMeridian.addEventListener('click', () => setListenSub('meridian'));
 el.listenSubSingle.addEventListener('click', () => setListenSub('single'));
 
+function setListenFolderStatus(detail = '') {
+  const folderName = state.listenDirectoryHandle && state.listenDirectoryHandle.name;
+  const selected = folderName ? `已選擇資料夾：「${folderName}」` : '尚未選擇試聽資料夾';
+  const persistenceNote = state.listenDirectoryPersistenceWarning
+    ? '（本次可正常使用；瀏覽器無法記住此資料夾，下次開啟時可能需要重選）'
+    : '';
+  el.listenFolderStatus.hidden = false;
+  el.listenFolderStatus.textContent = [selected, detail, persistenceNote].filter(Boolean).join('；');
+}
+
 async function prepareListenDirectory({ showEmptyError = false } = {}) {
   const rootHandle = await ensureListenDirectoryHandle();
-  if (!rootHandle) return null;
+  if (!rootHandle) {
+    setListenFolderStatus();
+    return null;
+  }
 
   try {
+    setListenFolderStatus('正在掃描 MP3 檔…');
     const result = await findListenDirectory(rootHandle);
     if (!result) {
       listenState.certifiedDir = null;
-      el.listenFolderStatus.hidden = false;
-      el.listenFolderStatus.textContent = '所選資料夾中沒有找到 MP3 檔。';
+      setListenFolderStatus('找不到 MP3 檔');
       if (showEmptyError) {
         showError(`所選資料夾與其 ${CERTIFIED_DIR} 子資料夾中都沒有 MP3 檔，請改選已有錄音成品的資料夾。`);
       }
@@ -406,16 +447,17 @@ async function prepareListenDirectory({ showEmptyError = false } = {}) {
     }
 
     listenState.certifiedDir = result.dirHandle;
-    el.listenFolderStatus.hidden = false;
-    el.listenFolderStatus.textContent = `已掃描「${result.dirHandle.name}」，找到 ${result.mp3Count} 個 MP3 檔。`;
+    const scanLocation = result.dirHandle.name !== rootHandle.name
+      ? `掃描子資料夾「${result.dirHandle.name}」，找到 ${result.mp3Count} 個 MP3 檔`
+      : `找到 ${result.mp3Count} 個 MP3 檔`;
+    setListenFolderStatus(scanLocation);
     return result.dirHandle;
   } catch (e) {
     console.error(e);
     listenState.certifiedDir = null;
-    el.listenFolderStatus.hidden = false;
     const permissionLost = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
     if (permissionLost) state.listenDirectoryReady = false;
-    el.listenFolderStatus.textContent = permissionLost ? '試聽資料夾的讀取權限已失效。' : '掃描 MP3 檔時發生錯誤。';
+    setListenFolderStatus(permissionLost ? '讀取權限已失效' : `掃描失敗${e && e.name ? `（${e.name}）` : ''}`);
     showError(permissionLost
       ? '瀏覽器已失去試聽資料夾的讀取權限，請按「選擇 MP3 資料夾」重新授權。'
       : '無法掃描所選資料夾，請重新選擇資料夾後再試一次。');
