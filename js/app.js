@@ -125,7 +125,10 @@ function showError(message) {
   el.errorBannerText.textContent = message;
   el.errorBanner.hidden = false;
 }
-el.errorBannerClose.addEventListener('click', () => { el.errorBanner.hidden = true; });
+function hideError() {
+  el.errorBanner.hidden = true;
+}
+el.errorBannerClose.addEventListener('click', hideError);
 
 // ---------- Screen switching ----------
 function showScreen(name) {
@@ -151,39 +154,43 @@ async function ensureDirectoryHandle({ mode = 'readwrite', purpose = 'recording'
   return promptForFolder({ mode, purpose });
 }
 
-function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew = false } = {}) {
+let activeFolderPrompt = null;
+
+function promptForFolder({ mode = 'readwrite', purpose = 'recording' } = {}) {
   return new Promise((resolve) => {
     const isListen = purpose === 'listen';
-    const currentHandle = isListen ? state.listenDirectoryHandle : state.directoryHandle;
+    if (activeFolderPrompt) {
+      el.folderPromptBtn.removeEventListener('click', activeFolderPrompt.onClick);
+      activeFolderPrompt.resolve(false);
+    }
+
     el.folderPromptTitle.textContent = isListen ? '需要選擇試聽資料夾' : '需要選擇儲存資料夾';
-    el.folderPromptText.textContent = currentHandle && !forceNew
-      ? `瀏覽器需要你重新確認資料夾的${isListen ? '讀取' : '存取'}權限，才能繼續。`
-      : isListen
-        ? `請選擇包含 MP3 的資料夾，或包含 ${CERTIFIED_DIR} 子資料夾的錄音專案資料夾。`
-        : '請選擇錄音專案資料夾，WAV 母帶與優化後的 MP3 會存進對應的子資料夾。';
+    el.folderPromptText.textContent = isListen
+      ? `請選擇包含 MP3 的資料夾，或包含 ${CERTIFIED_DIR} 子資料夾的錄音專案資料夾。`
+      : '請選擇錄音專案資料夾。WAV 母帶與優化後的 MP3 會存進對應的子資料夾。';
     el.folderPrompt.hidden = false;
 
-    const onClick = async () => {
-      el.folderPromptBtn.removeEventListener('click', onClick);
+    const session = { resolve, onClick: null };
+    activeFolderPrompt = session;
+    session.onClick = async () => {
+      if (activeFolderPrompt !== session) return;
+      el.folderPromptBtn.removeEventListener('click', session.onClick);
+      activeFolderPrompt = null;
       el.folderPrompt.hidden = true;
       let handle;
       try {
-        handle = forceNew ? null : currentHandle;
-        if (handle) {
-          const granted = await verifyPermission(handle, true, mode);
-          if (!granted) handle = null;
-        }
-        if (!handle) {
-          handle = await window.showDirectoryPicker({ mode });
-        }
+        // 必須在這個點擊裡直接開啟選檔視窗，不能先 await 舊資料夾的授權。
+        // 否則使用者操作過期，瀏覽器會把新選擇當成取消。
+        handle = await window.showDirectoryPicker({ mode });
       } catch (e) {
         if (!e || e.name !== 'AbortError') console.error(e);
+        const folderLabel = isListen ? '試聽資料夾' : '儲存資料夾';
         if (e && e.name === 'AbortError') {
-          showError('已取消選擇資料夾，尚未變更試聽資料夾。');
+          showError(`已取消選擇${folderLabel}。`);
         } else if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
-          showError(`瀏覽器未授權讀取資料夾，無法${isListen ? '開始試聽' : '繼續操作'}。`);
+          showError(`瀏覽器未授權此${folderLabel}，請再按一次並在系統視窗中選取資料夾。`);
         } else {
-          showError(`選擇資料夾時發生錯誤${e && e.name ? `（${e.name}）` : ''}，請再試一次。`);
+          showError(`選擇${folderLabel}時發生錯誤${e && e.name ? `（${e.name}）` : ''}，請再試一次。`);
         }
         resolve(false);
         return;
@@ -210,9 +217,10 @@ function promptForFolder({ mode = 'readwrite', purpose = 'recording', forceNew =
           console.warn('無法記住儲存資料夾，本次仍會繼續使用', e);
         }
       }
+      hideError();
       resolve(handle);
     };
-    el.folderPromptBtn.addEventListener('click', onClick);
+    el.folderPromptBtn.addEventListener('click', session.onClick);
   });
 }
 
@@ -256,7 +264,8 @@ async function ensureListenDirectoryHandle() {
 }
 
 el.settingsBtn.addEventListener('click', async () => {
-  await promptForFolder({ mode: 'readwrite', purpose: 'recording', forceNew: true });
+  const selected = await promptForFolder({ mode: 'readwrite', purpose: 'recording' });
+  if (selected) await refreshHome();
 });
 
 // ---------- 與資料夾同步錄音進度 ----------
@@ -264,15 +273,19 @@ el.settingsBtn.addEventListener('click', async () => {
 // 使用者手動刪除或補進檔案，進度與經脈清單的 ✅ 都會跟著更新。
 function setSyncStatus(kind, info = {}) {
   let text = '';
+  const folderName = state.directoryHandle && state.directoryHandle.name;
   if (kind === 'none') {
     text = '尚未選擇儲存資料夾。按「重新掃描資料夾」選擇後，進度會依資料夾裡實際的錄音檔顯示。';
   } else if (kind === 'need-permission') {
-    text = '目前顯示的是上次記錄的進度，尚未與資料夾比對。按「重新掃描資料夾」確認權限後就會更新。';
+    text = folderName
+      ? `已記住儲存資料夾「${folderName}」，尚未取得權限。按「重新掃描資料夾」可重新選擇。`
+      : '目前顯示的是上次記錄的進度，尚未與資料夾比對。按「重新掃描資料夾」重新選擇後就會更新。';
   } else if (kind === 'synced') {
     const t = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const selected = folderName ? `已選擇儲存資料夾：「${folderName}」。` : '';
     text = info.rawDirMissing
-      ? `已與資料夾同步（${t}）：還沒有 raw_wav 資料夾（尚未錄過音）。`
-      : `已與資料夾同步（${t}）：找到 ${info.wavFiles} 個 WAV 母帶。`;
+      ? `${selected}已與資料夾同步（${t}）：還沒有 raw_wav 資料夾（尚未錄過音）。`
+      : `${selected}已與資料夾同步（${t}）：找到 ${info.wavFiles} 個 WAV 母帶。`;
     if (info.legacyMp3 > 0) {
       text += ` 另有 ${info.legacyMp3} 個舊版 MP3（沒有 WAV 母帶，需重錄才能做音訊優化，不列入進度）。`;
     }
@@ -507,7 +520,7 @@ el.modeCardListen.addEventListener('click', async () => {
   await prepareListenDirectory({ showEmptyError: true });
 });
 el.listenChooseFolderBtn.addEventListener('click', async () => {
-  const selected = await promptForFolder({ mode: 'read', purpose: 'listen', forceNew: true });
+  const selected = await promptForFolder({ mode: 'read', purpose: 'listen' });
   if (selected) await prepareListenDirectory({ showEmptyError: true });
 });
 
