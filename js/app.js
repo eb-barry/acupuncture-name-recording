@@ -103,6 +103,7 @@ const state = {
   points: [],
   index: 0,
   directoryHandle: null,
+  folderProgressSynced: false,
   listenDirectoryHandle: null,
   listenDirectoryReady: false,
   listenDirectoryPersistenceWarning: false,
@@ -278,14 +279,17 @@ function setSyncStatus(kind, info = {}) {
     text = '尚未選擇儲存資料夾。按「重新掃描資料夾」選擇後，進度會依資料夾裡實際的錄音檔顯示。';
   } else if (kind === 'need-permission') {
     text = folderName
-      ? `已記住儲存資料夾「${folderName}」，尚未取得權限。按「重新掃描資料夾」可重新選擇。`
-      : '目前顯示的是上次記錄的進度，尚未與資料夾比對。按「重新掃描資料夾」重新選擇後就會更新。';
+      ? `已記住儲存資料夾「${folderName}」，尚未取得權限。完成標記先隱藏，按「重新掃描資料夾」後會依實際音檔顯示。`
+      : '尚未與資料夾比對，完成標記先隱藏。按「重新掃描資料夾」選擇後就會更新。';
   } else if (kind === 'synced') {
     const t = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const selected = folderName ? `已選擇儲存資料夾：「${folderName}」。` : '';
     text = info.rawDirMissing
       ? `${selected}已與資料夾同步（${t}）：還沒有 raw_wav 資料夾（尚未錄過音）。`
       : `${selected}已與資料夾同步（${t}）：找到 ${info.wavFiles} 個 WAV 母帶。`;
+    if ((info.wavFiles || 0) === 0 && (info.mp3Files || 0) === 0) {
+      text = `${selected}已掃描資料夾（${t}）：沒有 WAV 或 MP3，錄音完成標記已全部清除。`;
+    }
     if (info.legacyMp3 > 0) {
       text += ` 另有 ${info.legacyMp3} 個舊版 MP3（沒有 WAV 母帶，需重錄才能做音訊優化，不列入進度）。`;
     }
@@ -296,13 +300,19 @@ function setSyncStatus(kind, info = {}) {
 }
 
 // 只在「已經有資料夾權限」時掃描（不會自己跳出權限提示，權限提示必須由使用者點擊觸發）。
+function recordedInCurrentFolder(meridianName, code) {
+  return state.folderProgressSynced && isPointDone(meridianName, code);
+}
+
 async function syncProgressFromDisk() {
   if (!state.directoryHandle) {
+    state.folderProgressSynced = false;
     setSyncStatus('none');
     return false;
   }
   try {
     if (!(await verifyPermission(state.directoryHandle, false))) {
+      state.folderProgressSynced = false;
       setSyncStatus('need-permission');
       return false;
     }
@@ -311,10 +321,12 @@ async function syncProgressFromDisk() {
     for (const name of names) meridians.set(name, await getPointsForMeridian(name));
     const { doneByMeridian, stats } = await scanRecordedFiles(state.directoryHandle, meridians, getResetAt);
     replaceAllProgress(doneByMeridian);
+    state.folderProgressSynced = true;
     setSyncStatus('synced', stats);
     return true;
   } catch (e) {
     console.error(e);
+    state.folderProgressSynced = false;
     setSyncStatus('error', {
       message: e && e.name === 'NotFoundError' ? '找不到儲存資料夾（可能被移動或刪除了），請重新選擇資料夾。' : e && e.message,
     });
@@ -339,8 +351,8 @@ async function isMeridianFullyDone(meridianName) {
   const points = await getPointsForMeridian(meridianName);
   if (points.length === 0) return false;
   const progress = getMeridianProgress(meridianName);
-  const introDone = progress.done.includes(INTRO_CODE);
-  const allPointsDone = points.every((p) => progress.done.includes(p.code));
+  const introDone = recordedInCurrentFolder(meridianName, INTRO_CODE);
+  const allPointsDone = points.every((p) => recordedInCurrentFolder(meridianName, p.code));
   return introDone && allPointsDone;
 }
 
@@ -371,8 +383,10 @@ async function refreshSequentialHint() {
   if (!meridianName) return;
   const points = await getPointsForMeridian(meridianName);
   const progress = getMeridianProgress(meridianName);
-  const introDone = progress.done.includes(INTRO_CODE);
-  const doneCount = progress.done.filter((code) => code !== INTRO_CODE).length;
+  const introDone = recordedInCurrentFolder(meridianName, INTRO_CODE);
+  const doneCount = state.folderProgressSynced
+    ? progress.done.filter((code) => code !== INTRO_CODE).length
+    : 0;
 
   if (introDone && doneCount >= points.length && points.length > 0) {
     el.sequentialProgressHint.hidden = false;
@@ -398,7 +412,7 @@ function appendCountIntroOption(select, meridianName, { showDone = false } = {})
   if (!meridianHasCountIntro(meridianName)) return;
   const opt = document.createElement('option');
   opt.value = INTRO_CODE;
-  const done = showDone && isPointDone(meridianName, INTRO_CODE);
+  const done = showDone && recordedInCurrentFolder(meridianName, INTRO_CODE);
   opt.textContent = `穴位總數音檔${done ? '　✓ 已錄' : ''}`;
   select.appendChild(opt);
 }
@@ -413,7 +427,7 @@ async function populateSinglePointSelect() {
   for (const p of points) {
     const opt = document.createElement('option');
     opt.value = p.code;
-    const done = isPointDone(meridianName, p.code);
+    const done = recordedInCurrentFolder(meridianName, p.code);
     opt.textContent = `${p.code}　${p.name}${done ? '　✓ 已錄' : ''}`;
     el.pointSelectSingle.appendChild(opt);
   }
@@ -747,7 +761,10 @@ el.startSequentialBtn.addEventListener('click', async () => {
 
   const folderOk = await ensureDirectoryHandle();
   if (!folderOk) return;
-  await syncProgressFromDisk(); // 開始前先以資料夾裡實際的檔案為準
+  if (!(await syncProgressFromDisk())) {
+    showError('無法讀取所選資料夾，請按「重新掃描資料夾」後再開始錄音。');
+    return;
+  }
 
   let progress = getMeridianProgress(meridianName);
   let introDone = progress.done.includes(INTRO_CODE);
@@ -788,7 +805,10 @@ el.startSingleBtn.addEventListener('click', async () => {
 
   const folderOk = await ensureDirectoryHandle();
   if (!folderOk) return;
-  await syncProgressFromDisk();
+  if (!(await syncProgressFromDisk())) {
+    showError('無法讀取所選資料夾，請按「重新掃描資料夾」後再開始錄音。');
+    return;
+  }
 
   state.meridianName = meridianName;
   state.points = points;

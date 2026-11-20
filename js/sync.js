@@ -9,27 +9,45 @@ import { buildWavFileName, buildIntroWavFileName, INTRO_CODE } from './points-da
 
 export const RAW_WAV_DIR = 'raw_wav';
 
+async function countAudio(dirHandle, wavHandles) {
+  let mp3Files = 0;
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind !== 'file') continue;
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.wav')) {
+      if (wavHandles) wavHandles.set(name, handle);
+    } else if (lower.endsWith('.mp3')) {
+      mp3Files++;
+    }
+  }
+  return mp3Files;
+}
+
 // 回傳 { doneByMeridian, stats }
 //   doneByMeridian: { [經脈名]: [code, ...] }（口播以 INTRO_CODE 表示）
-//   stats: { wavFiles, legacyMp3, rawDirMissing }
+//   stats: { wavFiles, mp3Files, legacyMp3, rawDirMissing }
 export async function scanRecordedFiles(rootHandle, meridians, getResetAt = () => 0) {
-  const wavHandles = new Map(); // 檔名 → FileHandle
-  let legacyMp3 = 0;
+  const wavHandles = new Map(); // raw_wav 檔名 → FileHandle
   let rawDirMissing = false;
 
-  // 舊版（改存 WAV 之前）直接把 MP3 存在根目錄；這些不含 WAV 母帶，無法做音訊優化，只計數提醒使用者。
-  for await (const [name, handle] of rootHandle.entries()) {
-    if (handle.kind === 'file' && name.toLowerCase().endsWith('.mp3')) legacyMp3++;
-  }
+  // 根目錄的 MP3 是舊版錄音；raw_wav 與 certified_recording 也要一起數，
+  // 才能判斷這個資料夾是不是完全沒有音檔。
+  const legacyMp3 = await countAudio(rootHandle);
+  let mp3Files = legacyMp3;
 
   try {
     const rawDir = await rootHandle.getDirectoryHandle(RAW_WAV_DIR);
-    for await (const [name, handle] of rawDir.entries()) {
-      if (handle.kind === 'file' && name.toLowerCase().endsWith('.wav')) wavHandles.set(name, handle);
-    }
+    mp3Files += await countAudio(rawDir, wavHandles);
   } catch (e) {
     if (e && e.name === 'NotFoundError') rawDirMissing = true; // 還沒錄過任何東西：全部視為未完成
     else throw e;
+  }
+
+  try {
+    const certifiedDir = await rootHandle.getDirectoryHandle('certified_recording');
+    mp3Files += await countAudio(certifiedDir);
+  } catch (e) {
+    if (!e || e.name !== 'NotFoundError') throw e;
   }
 
   // 有效的錄音檔：存在，且（如果這條經脈按過「重錄整條經脈」）修改時間不早於重錄時間點
@@ -55,5 +73,5 @@ export async function scanRecordedFiles(rootHandle, meridians, getResetAt = () =
     doneByMeridian[meridianName] = done;
   }
 
-  return { doneByMeridian, stats: { wavFiles: wavHandles.size, legacyMp3, rawDirMissing } };
+  return { doneByMeridian, stats: { wavFiles: wavHandles.size, mp3Files, legacyMp3, rawDirMissing } };
 }
