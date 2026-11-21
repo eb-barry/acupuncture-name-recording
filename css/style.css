@@ -29,7 +29,7 @@
 }
 
 /* 保險起見：任何元素只要有 hidden 屬性就一定要隱藏，不管其他規則有沒有另外設定 display。
-   .modal / .banner 都會設定自己的 display: flex，若沒有這一條，會蓋掉瀏覽器對 [hidden] 的預設隱藏行為，
+   .banner 會設定自己的 display: flex，若沒有這一條，會蓋掉瀏覽器對 [hidden] 的預設隱藏行為，
    導致該元素在還沒被 JS 顯示之前就一直顯示在畫面上。 */
 [hidden] { display: none !important; }
 
@@ -369,29 +369,6 @@ select {
   font-size: 26px;
 }
 #listenAudio { display: none; }
-
-/* ---- Modal ---- */
-.modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 20;
-}
-
-.modal__card {
-  background: #fff;
-  border-radius: var(--radius);
-  padding: 24px;
-  max-width: 360px;
-  width: 100%;
-}
-
-.modal__card h2 { margin-top: 0; font-size: 17px; }
-.modal__card p { color: var(--ink-soft); font-size: 14px; }
 
 .attribution {
   text-align: center;
